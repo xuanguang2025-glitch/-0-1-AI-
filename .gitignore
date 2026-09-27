@@ -56,3 +56,5 @@ test-results/
 check-*.mjs
 check?.mjs
 dev-server.log
+coverage-qa/
+qa-coverage-out.txt
