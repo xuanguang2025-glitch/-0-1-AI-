@@ -178,7 +178,8 @@ export async function learnWord(userId: string, vocabularyId: string): Promise<{
   if (existing) return { userVocabId: existing.id }
 
   const created = await prisma.userVocabulary.create({
-    data: { userId, vocabularyId, learnedAt: new Date() },
+    // nextReviewAt = 学即到期：新词学完立刻可进复习队列（SRS 首次复习）
+    data: { userId, vocabularyId, learnedAt: new Date(), nextReviewAt: new Date() },
   })
 
   const today = localDate()

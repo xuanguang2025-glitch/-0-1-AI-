@@ -1,22 +1,26 @@
 /**
  * GET  /api/vocabulary/notebook — 生词本列表。
- * POST /api/vocabulary/notebook — 切换生词本收藏状态。
+ * POST /api/vocabulary/notebook — 加入/移出生词本（toggle）。
  */
 import { withAuth, ok } from '@/lib/api/handler'
 import { getNotebook, toggleNotebook } from '@/services/vocabulary.service'
-import { notebookBodySchema } from '@/features/vocabulary/schemas'
+import { z } from 'zod'
 
 export const GET = withAuth(
   async (ctx) => {
-    const data = await getNotebook(ctx.auth!.userId)
-    return ok(data, { traceId: ctx.traceId })
+    const items = await getNotebook(ctx.auth!.userId)
+    return ok(items, { traceId: ctx.traceId })
   },
 )
 
+const toggleSchema = z.object({
+  userVocabId: z.string().min(1),
+})
+
 export const POST = withAuth(
   async (ctx) => {
-    const data = await toggleNotebook(ctx.auth!.userId, ctx.data.userVocabId)
-    return ok(data, { traceId: ctx.traceId })
+    const result = await toggleNotebook(ctx.auth!.userId, ctx.data.userVocabId)
+    return ok(result, { traceId: ctx.traceId })
   },
-  { bodySchema: notebookBodySchema },
+  { bodySchema: toggleSchema },
 )

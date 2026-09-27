@@ -31,7 +31,11 @@
     "db:use-cloud": "tsx scripts/use-driver.ts cloud",
     "db:use-sqlite": "tsx scripts/use-driver.ts sqlite",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:report": "playwright show-report",
+    "stats:rebuild": "tsx scripts/rebuild-stats.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed/index.ts"
@@ -66,9 +70,11 @@
   "devDependencies": {
     "@esbuild/win32-x64": "0.25.12",
     "@eslint/eslintrc": "3.3.6",
+    "@playwright/test": "^1.56.1",
     "@types/node": "22.20.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@vitest/coverage-v8": "3.2.7",
     "autoprefixer": "10.6.1",
     "dotenv": "^16.6.1",
     "embedded-postgres": "18.4.0-beta.17",

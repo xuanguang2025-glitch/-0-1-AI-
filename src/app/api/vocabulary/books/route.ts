@@ -6,7 +6,7 @@ import { listBooks } from '@/services/vocabulary.service'
 
 export const GET = withAuth(
   async (ctx) => {
-    const data = await listBooks()
-    return ok(data, { traceId: ctx.traceId })
+    const books = await listBooks()
+    return ok(books, { traceId: ctx.traceId })
   },
 )

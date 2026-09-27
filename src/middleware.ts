@@ -13,7 +13,6 @@ import { locales, routing } from '@/lib/i18n/routing'
 const intlMiddleware = createIntlMiddleware(routing)
 
 const PUBLIC_PATHS = [
-  '',
   '/login',
   '/register',
   '/forgot-password',
@@ -52,7 +51,8 @@ function stripLocale(pathname: string): string {
 }
 
 function isPublic(stripped: string): boolean {
-  return PUBLIC_PATHS.some((p) => stripped === p || (p !== '' && stripped.startsWith(`${p}/`)))
+  if (stripped === '/' || stripped === '') return true // 落地页公开（T06 验收）
+  return PUBLIC_PATHS.some((p) => p !== '' && (stripped === p || stripped.startsWith(`${p}/`)))
 }
 
 function isAdmin(stripped: string): boolean {

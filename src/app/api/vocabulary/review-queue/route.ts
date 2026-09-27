@@ -1,5 +1,5 @@
 /**
- * GET /api/vocabulary/review-queue — 到期复习队列（nextReviewAt 升序，50 词上限）。
+ * GET /api/vocabulary/review-queue — 到期复习队列（≤50 词，nextReviewAt 升序）。
  */
 import { withAuth, ok } from '@/lib/api/handler'
 import { getReviewQueue } from '@/services/vocabulary.service'

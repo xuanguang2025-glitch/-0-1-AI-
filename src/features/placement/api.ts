@@ -36,8 +36,12 @@ export const placementApi = {
     unwrap(await fetch('/api/placement', { method: 'POST', credentials: 'same-origin' })),
 
   /** 拉取题目 */
-  questions: async (testId: string): Promise<PlacementQuestion[]> =>
-    unwrap(await fetch(`/api/placement/${testId}/questions`, { credentials: 'same-origin' })),
+  questions: async (testId: string): Promise<PlacementQuestion[]> => {
+    const data = await unwrap<{ questions: PlacementQuestion[] }>(
+      await fetch(`/api/placement/${testId}/questions`, { credentials: 'same-origin' }),
+    )
+    return data.questions ?? []
+  },
 
   /** 记录单题答案 */
   answer: async (testId: string, input: { questionId: string; userAnswer: string; responseMs: number }): Promise<null> =>

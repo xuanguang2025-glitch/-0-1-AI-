@@ -48,7 +48,7 @@ export const trendQuerySchema = z.object({
 
 /** GET /api/analytics/calendar */
 export const calendarQuerySchema = z.object({
-  days: z.coerce.number().int().min(28).max(366).optional(),
+  days: z.coerce.number().int().min(30).max(366).optional(),
 })
 
 export type TodayQuery = z.infer<typeof todayQuerySchema>
