@@ -1,0 +1,138 @@
+/* =============================================================================
+ * EnglishAI Design Tokens (架构 §7.1)
+ * 全部走 CSS 变量（hsl 通道值，便于 Tailwind `hsl(var(--x))` 引用）
+ * ============================================================================= */
+
+/* ================= 调色板（Light 默认） ================= */
+:root {
+  /* Brand / Primary — Indigo-Violet（AI + Education 的双关） */
+  --brand-50: 240 100% 98%;
+  --brand-100: 239 100% 96%;
+  --brand-200: 238 100% 93%;
+  --brand-300: 236 96% 88%;
+  --brand-400: 234 89% 80%;
+  --brand-500: 232 84% 70%;
+  --brand-600: 231 76% 61%; /* 主色 */
+  --brand-700: 228 70% 51%;
+  --brand-800: 226 68% 42%;
+  --brand-900: 224 64% 35%;
+
+  /* Semantic */
+  --background: 0 0% 100%;
+  --foreground: 224 24% 12%;
+  --surface: 0 0% 100%;
+  --surface-muted: 220 20% 98%;
+  --surface-raised: 0 0% 100%;
+  --overlay: 224 24% 12%;
+  --overlay-alpha: 0.45;
+  --border: 220 14% 91%;
+  --border-strong: 220 12% 82%;
+  --ring: 231 76% 61%;
+  --primary: var(--brand-600);
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 20% 96%;
+  --secondary-foreground: 224 24% 18%;
+  --muted: 220 20% 96%;
+  --muted-foreground: 220 10% 46%;
+  --accent: 231 76% 61%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 142 71% 45%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 224 24% 12%;
+  --info: 199 89% 48%;
+  --info-foreground: 0 0% 100%;
+
+  /* 学科色（图表六维固定映射，禁止随主题乱跳） */
+  --c-vocabulary: 231 76% 61%;
+  --c-grammar: 262 83% 66%;
+  --c-listening: 199 89% 48%;
+  --c-speaking: 330 81% 60%;
+  --c-reading: 142 71% 45%;
+  --c-writing: 38 92% 50%;
+
+  /* 图表通用 */
+  --chart-1: 231 76% 61%;
+  --chart-2: 199 89% 48%;
+  --chart-3: 142 71% 45%;
+  --chart-4: 38 92% 50%;
+  --chart-5: 330 81% 60%;
+  --chart-6: 262 83% 66%;
+  --chart-grid: 220 14% 91%;
+  --chart-axis: 220 10% 46%;
+
+  /* 圆角 */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+  --radius-full: 9999px;
+
+  /* 阴影（柔和、多层） */
+  --shadow-xs: 0 1px 2px 0 hsl(224 24% 12% / 0.04);
+  --shadow-sm: 0 1px 3px 0 hsl(224 24% 12% / 0.06), 0 1px 2px -1px hsl(224 24% 12% / 0.06);
+  --shadow-md: 0 4px 12px -2px hsl(224 24% 12% / 0.08), 0 2px 4px -2px hsl(224 24% 12% / 0.05);
+  --shadow-lg: 0 12px 28px -6px hsl(224 24% 12% / 0.12), 0 4px 8px -4px hsl(224 24% 12% / 0.06);
+  --shadow-xl: 0 24px 48px -12px hsl(224 24% 12% / 0.18);
+  --shadow-brand: 0 8px 24px -6px hsl(231 76% 61% / 0.35);
+  --shadow-inset: inset 0 1px 0 0 hsl(0 0% 100% / 0.06);
+
+  /* 间距（4pt 栅格） */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  /* 字阶 */
+  --font-sans: ui-sans-serif, 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-en: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --text-xs: 12px/16px;
+  --text-sm: 14px/20px;
+  --text-base: 16px/24px;
+  --text-lg: 18px/28px;
+  --text-xl: 20px/28px;
+  --text-2xl: 24px/32px;
+  --text-3xl: 30px/38px;
+  --text-4xl: 36px/44px;
+  --text-5xl: 48px/56px;
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.02em;
+
+  /* 层级 */
+  --z-dropdown: 40;
+  --z-sticky: 50;
+  --z-overlay: 60;
+  --z-modal: 70;
+  --z-toast: 80;
+
+  /* 动效（reduce-motion 时全部置 0.01ms） */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 布局尺寸 */
+  --sidebar-w: 260px;
+  --sidebar-w-collapsed: 72px;
+  --topbar-h: 60px;
+  --bottomnav-h: 64px;
+  --content-max: 1200px;
+
+  color-scheme: light;
+}

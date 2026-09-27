@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+dist
+build
+coverage
+.data
+package-lock.json
+prisma/migrations
+prisma/data
+*.md

@@ -1,0 +1,97 @@
+/* =============================================================================
+ * EnglishAI 自定义工具类（架构 §7.1）
+ * 使用普通 CSS 类（非 @layer），确保在 Next CSS 管线中稳定输出，
+ * 且导入顺序位于 tailwind 之后 → 自定义类可覆盖工具类。
+ * ============================================================================= */
+
+/* 文本平衡 / 省略 */
+.text-balance {
+  text-wrap: balance;
+}
+.text-pretty {
+  text-wrap: pretty;
+}
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 渐变文字 */
+.text-gradient-brand {
+  background-image: linear-gradient(
+    120deg,
+    hsl(var(--brand-600)),
+    hsl(var(--brand-400)),
+    hsl(var(--c-grammar))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 玻璃拟态 */
+.glass {
+  background-color: hsl(var(--surface) / 0.72);
+  backdrop-filter: blur(12px) saturate(140%);
+}
+
+/* 统一焦点环（无障碍） */
+.focus-ring {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* 隐藏滚动条但保留滚动 */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* 内容最大宽度容器（对齐 --content-max） */
+.container-content {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+  padding-inline: var(--space-4);
+}
+
+/* 骨架屏微光动画 */
+@keyframes englishai-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    hsl(var(--foreground) / 0.06),
+    transparent
+  );
+  animation: englishai-shimmer 1.4s infinite;
+}

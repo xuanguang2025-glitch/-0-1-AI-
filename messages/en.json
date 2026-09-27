@@ -1,0 +1,33 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "vocabulary": "Vocabulary",
+    "listening": "Listening",
+    "speaking": "Speaking",
+    "reading": "Reading",
+    "writing": "Writing",
+    "grammar": "Grammar",
+    "translation": "Translation",
+    "exam": "Mock Exam",
+    "placement": "Placement Test",
+    "profile": "Profile",
+    "achievements": "Achievements",
+    "analytics": "Analytics",
+    "settings": "Settings",
+    "tutor": "AI Tutor",
+    "group": { "learn": "Learn", "exam": "Exam", "me": "Me" }
+  },
+  "common": {
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "confirm": "OK",
+    "backHome": "Back Home",
+    "loading": "Loading…",
+    "search": "Search",
+    "seeAll": "See all",
+    "empty": "Nothing here yet",
+    "errorTitle": "Failed to load",
+    "theme": { "light": "Light", "dark": "Dark", "system": "System" },
+    "language": "Language"
+  }
+}

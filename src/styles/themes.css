@@ -1,0 +1,49 @@
+/* =============================================================================
+ * EnglishAI Theme Overrides (架构 §7.1)
+ * `.dark` 由 next-themes 切换（class 策略）；支持 system。
+ * ============================================================================= */
+
+/* ================= Dark ================= */
+.dark {
+  --background: 224 24% 8%;
+  --foreground: 220 20% 96%;
+  --surface: 224 24% 11%;
+  --surface-muted: 224 20% 14%;
+  --surface-raised: 224 22% 15%;
+  --overlay-alpha: 0.6;
+  --border: 222 16% 22%;
+  --border-strong: 222 14% 30%;
+  --ring: 234 89% 76%;
+  --secondary: 222 18% 18%;
+  --secondary-foreground: 220 20% 96%;
+  --muted: 222 18% 18%;
+  --muted-foreground: 220 12% 62%;
+  --accent: 234 89% 74%;
+  --accent-foreground: 224 24% 8%;
+  --warning: 38 95% 58%;
+  --warning-foreground: 224 24% 8%;
+  --info: 199 89% 55%;
+  --info-foreground: 224 24% 8%;
+  --chart-grid: 222 16% 22%;
+  --chart-axis: 220 12% 62%;
+  --shadow-md: 0 4px 12px -2px hsl(0 0% 0% / 0.4), 0 2px 4px -2px hsl(0 0% 0% / 0.3);
+  --shadow-lg: 0 12px 28px -6px hsl(0 0% 0% / 0.5);
+  --shadow-brand: 0 8px 24px -6px hsl(231 76% 61% / 0.45);
+
+  color-scheme: dark;
+}
+
+/* 尊重系统减弱动效 + 用户在设置里手动关闭 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+  }
+}
+
+[data-reduce-motion='true'] {
+  --dur-fast: 0.01ms;
+  --dur-base: 0.01ms;
+  --dur-slow: 0.01ms;
+}

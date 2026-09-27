@@ -1,0 +1,33 @@
+{
+  "nav": {
+    "dashboard": "仪表盘",
+    "vocabulary": "词汇",
+    "listening": "听力",
+    "speaking": "口语",
+    "reading": "阅读",
+    "writing": "写作",
+    "grammar": "语法",
+    "translation": "翻译",
+    "exam": "模考",
+    "placement": "水平测试",
+    "profile": "个人中心",
+    "achievements": "成就",
+    "analytics": "学习分析",
+    "settings": "设置",
+    "tutor": "AI 学伴",
+    "group": { "learn": "学习", "exam": "备考", "me": "我的" }
+  },
+  "common": {
+    "retry": "重试",
+    "cancel": "取消",
+    "confirm": "确定",
+    "backHome": "返回首页",
+    "loading": "加载中…",
+    "search": "搜索",
+    "seeAll": "查看全部",
+    "empty": "暂无内容",
+    "errorTitle": "加载失败",
+    "theme": { "light": "浅色", "dark": "深色", "system": "跟随系统" },
+    "language": "语言"
+  }
+}

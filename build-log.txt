@@ -1,0 +1,11 @@
+   ▲ Next.js 15.5.26
+   - Environments: .env.local, .env
+   - Experiments (use with caution):
+     · serverActions
+
+
+> Build error occurred
+Error: [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":50,"threshold":50,"scope":"turn","targets":["D:\\徐浩然\\2026-09-26-21-59-15\\englishai\\.next\\package.json"],"targetCount":1}
+    at checkBulkDeleteGuard (C:\Program Files\WorkBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:239:19)
+    at tryTrash (C:\Program Files\WorkBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:591:5)
+    at Object.unlink (C:\Program Files\WorkBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:744:9)
