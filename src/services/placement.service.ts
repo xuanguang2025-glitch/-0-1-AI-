@@ -5,12 +5,13 @@
  */
 import { prisma } from '@/lib/db'
 import { AppError, errNotFound } from '@/lib/api/errors'
-import { localDate } from './onboarding.service'
+import { localDate } from '@/lib/utils/date'
+import { Prisma } from '@prisma/client'
 
 export const PLACEMENT_QUESTION_COUNT = 30
 
-const DIMENSIONS = ['vocabulary', 'grammar', 'reading', 'listening'] as const
-type Dimension = (typeof DIMENSIONS)[number]
+type Dimension = 'vocabulary' | 'grammar' | 'reading' | 'listening'
+const DIMENSIONS: readonly string[] = ['vocabulary', 'grammar', 'reading', 'listening']
 
 export interface PlacementAnswer {
   questionId: string
@@ -85,7 +86,11 @@ export async function startTest(userId: string): Promise<{ testId: string; quest
   const pickedIds: string[] = []
   for (const [dim, count] of plan) {
     const rows = await prisma.question.findMany({
-      where: { category: dim, status: 'PUBLISHED', deletedAt: null },
+      where: {
+        OR: [{ tags: { array_contains: dim } }, { category: dim }],
+        status: 'PUBLISHED',
+        deletedAt: null,
+      },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
       take: count * 4, // 池子抽样，避免每次同题
@@ -106,27 +111,41 @@ export async function startTest(userId: string): Promise<{ testId: string; quest
   return { testId: test.id, questionCount: pickedIds.length }
 }
 
-/** 读取测试题目（去答案） */
-export async function getTestQuestions(userId: string, testId: string): Promise<Array<{ id: string; type: string; category: string; stem: string; options: unknown }>> {
+/** 从 tags/category 归一化维度（seed 把维度写在 tags[0]） */
+export function questionDimension(q: { tags: unknown; category: string }): string {
+  const tags = Array.isArray(q.tags) ? (q.tags as unknown[]) : []
+  for (const t of tags) {
+    const s = String(t).toLowerCase()
+    if ((DIMENSIONS as readonly string[]).includes(s)) return s
+  }
+  return q.category
+}
+
+/** 读取测试题目（去答案，含归一化维度） */
+export async function getTestQuestions(userId: string, testId: string): Promise<Array<{ id: string; type: string; category: string; dimension: string; stem: string; options: unknown }>> {
   const test = await prisma.placementTest.findFirst({ where: { id: testId, userId }, select: { answers: true, status: true } })
   if (!test) throw errNotFound('测试不存在')
   const slots = (test.answers as Array<{ questionId: string }> | null) ?? []
   const ids = slots.map((s) => s.questionId)
   const questions = await prisma.question.findMany({
     where: { id: { in: ids } },
-    select: { id: true, type: true, category: true, stem: true, options: true },
+    select: { id: true, type: true, category: true, tags: true, stem: true, options: true },
   })
   // 保持出题顺序
   const byId = new Map(questions.map((q) => [q.id, q]))
-  return ids.map((id) => byId.get(id)).filter((q): q is NonNullable<typeof q> => q != null)
+  return ids
+    .map((id) => byId.get(id))
+    .filter((q): q is NonNullable<typeof q> => q != null)
+    .map((q) => ({ ...q, dimension: questionDimension(q) }))
 }
 
 /** 记录单题答案（幂等：同题覆盖） */
 export async function saveAnswer(userId: string, testId: string, questionId: string, userAnswer: string, responseMs: number): Promise<void> {
   const test = await prisma.placementTest.findFirst({ where: { id: testId, userId, status: 'IN_PROGRESS' } })
   if (!test) throw errNotFound('进行中的测试不存在')
-  const question = await prisma.question.findUnique({ where: { id: questionId }, select: { answer: true, category: true, answerAliases: true } })
+  const question = await prisma.question.findUnique({ where: { id: questionId }, select: { answer: true, category: true, tags: true, answerAliases: true } })
   if (!question) throw errNotFound('题目不存在')
+  const dimension = questionDimension(question)
 
   const aliases = Array.isArray(question.answerAliases) ? (question.answerAliases as string[]) : []
   const normalized = userAnswer.trim().toUpperCase()
@@ -134,11 +153,11 @@ export async function saveAnswer(userId: string, testId: string, questionId: str
 
   const slots = ((test.answers as Array<Record<string, unknown>> | null) ?? []).slice()
   const idx = slots.findIndex((s) => s.questionId === questionId)
-  const entry = { questionId, userAnswer, isCorrect, dimension: question.category, responseMs }
+  const entry = { questionId, userAnswer, isCorrect, dimension, responseMs }
   if (idx >= 0) slots[idx] = entry
   else slots.push(entry)
 
-  await prisma.placementTest.update({ where: { id: testId }, data: { answers: slots } })
+  await prisma.placementTest.update({ where: { id: testId }, data: { answers: slots as unknown as Prisma.InputJsonValue } })
 }
 
 /** 提交：规则评分 → CEFR → CET 估算 → 写 Profile 能力向量 + DailyStat；AI 报告独立降级 */
@@ -188,9 +207,9 @@ export async function submitTest(userId: string, testId: string): Promise<{ scor
       data: {
         status: 'GRADED',
         completedAt: new Date(),
-        scores,
+        scores: scores as unknown as Prisma.InputJsonValue,
         cefrLevel: cefr as never,
-        cetEstimate: cet,
+        cetEstimate: cet as unknown as Prisma.InputJsonValue,
         aiReport: aiReport as never,
         aiDegraded,
       },

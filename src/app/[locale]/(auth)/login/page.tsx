@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 import { LoginForm } from '@/features/auth/components/login-form'
+import { ROUTES } from '@/lib/constants/routes'
 
 export const metadata: Metadata = { title: '登录' }
 

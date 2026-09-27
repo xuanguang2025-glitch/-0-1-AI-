@@ -4,7 +4,7 @@
  */
 import { prisma } from '@/lib/db'
 import { createLogger } from '@/lib/logger/logger'
-import { localDate } from './onboarding.service'
+import { localDate } from '@/lib/utils/date'
 import { levelProgress, calcStreakDays, xpForEvent } from './gamification/level'
 import type { AiRunContext } from './ai/types'
 import type { AiResult } from './ai/types'
@@ -44,14 +44,14 @@ export async function getDashboard(userId: string, aiCtx: AiRunContext): Promise
     }),
     prisma.userVocabulary.count({ where: { userId, nextReviewAt: { lte: new Date() } } }),
     prisma.vocabularyBookItem.findFirst({
-      orderBy: { addedAt: 'desc' },
+      orderBy: { orderIndex: 'desc' },
       select: { book: { select: { slug: true, name: true } } },
     }).catch(() => null),
     prisma.profile.findUnique({ where: { userId }, select: { abilityVector: true } }),
-    prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { nickname: true, avatarUrl: true, userStats: { select: { xp: true, longestStreak: true } } } }),
+    prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { nickname: true, avatarUrl: true, stats: { select: { xp: true, longestStreak: true } } } }),
   ])
 
-  const xp = userRow.userStats?.xp ?? 0
+  const xp = userRow.stats?.xp ?? 0
   const lv = levelProgress(xp)
 
   const learnedDates = new Set(stats.filter((s) => s.wordsLearned > 0 || s.wordsReviewed > 0).map((s) => s.date))
@@ -89,7 +89,7 @@ export async function getDashboard(userId: string, aiCtx: AiRunContext): Promise
 
   return {
     user: { nickname: userRow.nickname, avatarUrl: userRow.avatarUrl, level: lv.level, levelPct: lv.progressPct, xpToNext: lv.xpToNext },
-    streak: { days: streakDays, todayDone: learnedDates.has(today), longest: userRow.userStats?.longestStreak ?? 0 },
+    streak: { days: streakDays, todayDone: learnedDates.has(today), longest: userRow.stats?.longestStreak ?? 0 },
     today: {
       date: today,
       tasksTotal: tasks.length,

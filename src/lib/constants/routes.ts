@@ -14,6 +14,8 @@ export const ROUTES = {
     root: '/vocabulary',
     library: '/vocabulary/library',
     review: '/vocabulary/review',
+    learn: '/vocabulary/learn',
+    notebook: '/vocabulary/notebook',
     records: '/vocabulary/records',
   },
   listening: '/listening',

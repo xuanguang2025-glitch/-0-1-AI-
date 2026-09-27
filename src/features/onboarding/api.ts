@@ -23,12 +23,12 @@ async function unwrap<T>(response: Response): Promise<T> {
 }
 
 export const onboardingApi = {
-  getDraft: (): Promise<OnboardingDraftResponse> => unwrap(fetch('/api/onboarding', { credentials: 'same-origin' })),
+  getDraft: async (): Promise<OnboardingDraftResponse> => unwrap(await fetch('/api/onboarding', { credentials: 'same-origin' })),
 
   /** submit：服务端二次 Zod 校验；失败抛出 message（表单顶部展示） */
-  submit: (draft: OnboardingDraft, skipped: boolean): Promise<OnboardingSubmitResponse> =>
+  submit: async (draft: OnboardingDraft, skipped: boolean): Promise<OnboardingSubmitResponse> =>
     unwrap(
-      fetch('/api/onboarding', {
+      await fetch('/api/onboarding', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },

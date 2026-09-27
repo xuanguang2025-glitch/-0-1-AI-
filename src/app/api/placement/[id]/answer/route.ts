@@ -8,7 +8,7 @@ import { saveAnswer } from '@/services/placement.service'
 const answerSchema = z.object({
   questionId: z.string().min(1),
   userAnswer: z.string().min(1, '请选择答案').max(200),
-  responseMs: z.number().int().min(0).max(600_000).default(0),
+  responseMs: z.number().int().min(0).max(600_000),
 })
 
 type Ctx = { params: { id: string } }

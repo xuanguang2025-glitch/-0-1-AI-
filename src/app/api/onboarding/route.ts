@@ -25,13 +25,16 @@ const submitSchema = z.object({
 
 export const GET = withAuth(
   async (ctx) => ok(await onboardingService.getDraft(ctx.auth!.userId), { traceId: ctx.traceId }),
-  { auth: true },
+  {},
 )
 
 export const POST = withAuth(
   async (ctx) => {
-    const result = await onboardingService.submit(ctx.auth!.userId, ctx.data.steps, ctx.data.skipped)
+    // 归一化：service 层 OnboardingSteps 要求 null（非 undefined）
+    const raw = ctx.data.steps
+    const steps = { ...raw, targetExam: raw.targetExam ?? null, targetDate: raw.targetDate ?? null }
+    const result = await onboardingService.submit(ctx.auth!.userId, steps, ctx.data.skipped === true)
     return ok(result, { traceId: ctx.traceId })
   },
-  { auth: true, bodySchema: submitSchema },
+  { bodySchema: submitSchema },
 )

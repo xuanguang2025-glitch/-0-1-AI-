@@ -5,6 +5,8 @@
 import { prisma } from '@/lib/db'
 import { errNotFound } from '@/lib/api/errors'
 import { createLogger } from '@/lib/logger/logger'
+import { localDate } from '@/lib/utils/date'
+import { Prisma } from '@prisma/client'
 
 const log = createLogger('onboarding.service')
 
@@ -56,13 +58,13 @@ export async function submit(userId: string, steps: OnboardingSteps, skipped: bo
     await tx.profile.upsert({
       where: { userId },
       update: {
-        onboardingData: steps,
+        onboardingData: steps as unknown as Prisma.InputJsonValue,
         onboardingCompletedAt: new Date(),
         cefrLevel: cefr as never,
       },
       create: {
         userId,
-        onboardingData: steps,
+        onboardingData: steps as unknown as Prisma.InputJsonValue,
         onboardingCompletedAt: new Date(),
         cefrLevel: cefr as never,
       },
@@ -90,9 +92,72 @@ export async function submit(userId: string, steps: OnboardingSteps, skipped: bo
     planId = goal.id
   }
 
+  // 首周任务（未跳过时）：按每日时长生成 7 天 × 3 类任务，已有任务的日期跳过（幂等）
+  if (!skipped) {
+    await generateFirstWeekTasks(userId, steps.dailyTime)
+  }
+
   log.info({ msg: 'onboarding submitted', userId, skipped })
   return {
     profile: { cefrLevel: cefr, onboardingCompletedAt: new Date().toISOString() },
     planId,
   }
+}
+
+/** 生成首周任务：VOCAB（新词）+ REVIEW（复习）+ READING（阅读），共 7 天 */
+async function generateFirstWeekTasks(userId: string, dailyMinutes: number): Promise<void> {
+  const today = localDate()
+  const existing = await prisma.studyTask.findMany({
+    where: { userId, date: { gte: today, lte: dateOffset(today, 6) } },
+    select: { date: true },
+  })
+  const covered = new Set(existing.map((t) => t.date))
+  const vocabCount = Math.max(5, Math.round(dailyMinutes * 0.4))
+  const reviewCount = Math.max(10, Math.round(dailyMinutes * 0.3))
+  const readingMin = Math.max(5, dailyMinutes - Math.round(dailyMinutes * 0.7))
+  const rows: Array<{
+    userId: string
+    date: string
+    taskType: 'VOCAB' | 'REVIEW' | 'READING'
+    title: string
+    targetValue: number
+    unit: string
+    sortOrder: number
+    payload: Prisma.InputJsonValue
+  }> = []
+  for (let i = 0; i < 7; i++) {
+    const date = dateOffset(today, i)
+    if (covered.has(date)) continue
+    rows.push(
+      {
+        userId, date, taskType: 'VOCAB',
+        title: `学习新词 ${vocabCount} 个`,
+        targetValue: vocabCount, unit: 'word', sortOrder: 0,
+        payload: { type: 'vocabulary_learn' } as Prisma.InputJsonValue,
+      },
+      {
+        userId, date, taskType: 'REVIEW',
+        title: '完成到期复习',
+        targetValue: reviewCount, unit: 'word', sortOrder: 1,
+        payload: { type: 'vocabulary_review' } as Prisma.InputJsonValue,
+      },
+      {
+        userId, date, taskType: 'READING',
+        title: `阅读练习 ${readingMin} 分钟`,
+        targetValue: readingMin, unit: 'minute', sortOrder: 2,
+        payload: { type: 'reading' } as Prisma.InputJsonValue,
+      },
+    )
+  }
+  if (rows.length > 0) {
+    await prisma.studyTask.createMany({ data: rows })
+    log.info({ msg: 'first-week tasks created', userId, count: rows.length })
+  }
+}
+
+/** YYYY-MM-DD 日期偏移（UTC 口径，与 localDate 一致） */
+function dateOffset(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
 }

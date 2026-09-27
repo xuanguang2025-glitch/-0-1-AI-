@@ -1,8 +1,8 @@
 import { NextIntlClientProvider } from 'next-intl'
 import { notFound } from 'next/navigation'
-import { hasLocale } from 'next-intl'
 
 import { locales, type Locale } from '@/lib/i18n/routing'
+import { getMessages } from '@/lib/i18n/messages'
 
 /**
  * [locale] 段布局：校验 locale 参数并注入对应 messages（覆盖 root 的默认 zh-CN）。
@@ -19,9 +19,9 @@ export default async function LocaleLayout({
   params: Promise<{ locale: string }>
 }): Promise<React.JSX.Element> {
   const { locale } = await params
-  if (!hasLocale(locales, locale)) notFound()
+  if (!(locales as readonly string[]).includes(locale)) notFound()
 
-  const messages = (await import(`../../../messages/${locale}.json`)).default
+  const messages = getMessages(locale as Locale)
 
   return (
     <NextIntlClientProvider locale={locale} messages={messages}>

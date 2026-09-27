@@ -3,11 +3,12 @@
  */
 import { withAuth, ok } from '@/lib/api/handler'
 import { submitReview } from '@/services/vocabulary.service'
+import type { SelfRating } from '@/services/vocabulary/srs/srs.engine'
 import { reviewBodySchema } from '@/features/vocabulary/schemas'
 
 export const POST = withAuth(
   async (ctx) => {
-    const data = await submitReview(ctx.auth!.userId, ctx.data)
+    const data = await submitReview(ctx.auth!.userId, { ...ctx.data, rating: ctx.data.rating as SelfRating })
     return ok(data, { traceId: ctx.traceId })
   },
   { bodySchema: reviewBodySchema, rateLimit: { key: 'vocab-review', limit: 120, windowMs: 60_000 } },

@@ -38,7 +38,7 @@ const STEP_META: Record<StepKey, { title: string; hint: string }> = {
 export default function OnboardingPage(): React.JSX.Element {
   const t = useTranslations('common')
   const router = useRouter()
-  const { draft, update, reset, ready } = useOnboardingDraft()
+  const { draft, update, reset } = useOnboardingDraft()
   const [step, setStep] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)

@@ -119,7 +119,11 @@ const EXAMS = [
 export function StepExam({ draft, update }: { draft: OnboardingDraft; update: (k: 'targetExam', v: OnboardingDraft['targetExam']) => void }): React.JSX.Element {
   return (
     <div className="space-y-4">
-      <OptionGrid options={EXAMS} value={draft.targetExam} onChange={(v) => update('targetExam', v)} />
+      <OptionGrid
+        options={EXAMS}
+        value={draft.targetExam ?? null}
+        onChange={(v) => update('targetExam', v as OnboardingDraft['targetExam'])}
+      />
       <button
         type="button"
         onClick={() => update('targetExam', null)}

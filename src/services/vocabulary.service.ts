@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db'
 import { AppError, errNotFound } from '@/lib/api/errors'
 import { review, stateFromRow, type SelfRating } from './vocabulary/srs/srs.engine'
 import { xpForEvent } from './gamification/level'
-import { localDate } from './onboarding.service'
+import { localDate } from '@/lib/utils/date'
 import { createLogger } from '@/lib/logger/logger'
 
 const log = createLogger('vocabulary.service')
@@ -33,7 +33,7 @@ export async function getTodayWords(userId: string, bookSlug?: string) {
 
   const items = await prisma.vocabularyBookItem.findMany({
     where: { bookId: book.id },
-    orderBy: { sortOrder: 'asc' },
+    orderBy: { orderIndex: 'asc' },
     select: { vocabularyId: true },
     take: 400,
   })

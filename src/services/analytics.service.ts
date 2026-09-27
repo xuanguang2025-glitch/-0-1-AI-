@@ -2,7 +2,7 @@
  * 学习分析服务（架构 §8.1 T08）：指标卡 / 30 天趋势 / 日历热力。
  */
 import { prisma } from '@/lib/db'
-import { localDate } from './onboarding.service'
+import { localDate } from '@/lib/utils/date'
 
 export interface TrendPoint {
   date: string

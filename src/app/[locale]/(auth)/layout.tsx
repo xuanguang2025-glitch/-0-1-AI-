@@ -1,6 +1,5 @@
 import Link from 'next/link'
 
-import { ROUTES } from '@/lib/constants/routes'
 
 /**
  * (auth) 组布局：居中卡片 + 品牌 Logo。
