@@ -49,3 +49,10 @@ storage/
 .next-stale-build/
 .next-stale2/
 .next-x-stale/
+
+# ---- playwright artifacts & temp scripts ----
+playwright-report/
+test-results/
+check-*.mjs
+check?.mjs
+dev-server.log
