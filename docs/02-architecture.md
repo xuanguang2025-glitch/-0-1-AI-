@@ -4,9 +4,10 @@
 | --- | --- |
 | Language | 简体中文（技术名词保留英文） |
 | Project Name | `englishai` |
-| 文档版本 | v1.1（2026-09-27 修订：新增 Tier A 内嵌 PostgreSQL 方案 + 版本精确锁定 + Node 兼容性结论） |
+| 文档版本 | v1.2（2026-09-27 二次修订：**§5.1 SRS 口径裁决** A 追认 + B 回改 1 项承重结构；**§5.2 任务生成** A 追认 + Phase 2 规格保留） |
 | 作者 | 高见远 · Architect |
 | 上游输入 | `docs/01-prd.md`（77 路由 / 21 页面模块 / R001-R052 / A1-A18 / §9.4 设计输入） |
+| QA 输入 | `docs/03-qa-report.md`（问题 #1 SRS 口径、#9 任务生成 → 本文 §5.1.4 / §5.2 裁决） |
 | 下游交付对象 | 工程师（Phase 1 编码唯一依据） |
 | 运行环境（**已实测确认**） | Windows 10/11 · Node **v22.22.2**（基线锁 22 LTS）· npm **10.9.7** · registry 已为 `registry.npmmirror.com` · **无 Docker** · **无系统 PostgreSQL** · 目录 `D:/徐浩然/2026-09-26-21-59-15/englishai`（含中文目录名，已实测兼容） |
 | 数据库起法（**已实测通过**） | **Tier A · npm 内嵌 PostgreSQL 18.4**（`embedded-postgres@18.4.0-beta.17`）+ **Prisma 6.19.3** —— 零系统安装，`provider` 保持 `postgresql` |
@@ -19,7 +20,7 @@
 | 2 | 数据库设计（52 表 Prisma schema / ER 图 / 索引与聚合策略 / **§2.6 三档启动方案 Tier A·C·B**） |
 | 3 | API 设计（Envelope / 错误码 / 140 条接口 / 流式约定） |
 | 4 | AI Service 设计（Gateway / Provider Adapter / Prompt / 降级矩阵） |
-| 5 | 核心算法约定（SRS / 任务生成 / 推荐 / XP / CEFR / 计划调整） |
+| 5 | 核心算法约定（SRS **§5.1.4 裁决** / 任务生成 **§5.2 裁决** / 推荐 / XP / CEFR / 计划调整） |
 | 6 | 项目目录结构 |
 | 7 | 组件设计（Design Token / 基础与复合组件 / 状态组件 / 响应式） |
 | 8 | Phase 1 任务分解 T01–T10 |
@@ -3147,6 +3148,8 @@ sequenceDiagram
 
 #### 5.1.1 状态机
 
+> **口径声明（v1.2 裁决，2026-09-27）**：本节已与 Phase 1 实现对齐。§5.1.1 阈值、§5.1.3 的 `timeFactor` 与 `wrongPenalty` 采用**实现的 Phase 1 口径**（追认，见 §5.1.4 裁决 A）；**唯独间隔阶梯长尾与毕业间隔保留文档口径并列为 Phase 2 必做项**（见 §5.1.4 裁决 B）。
+
 ```mermaid
 stateDiagram-v2
     [*] --> NEW : 词进入计划
@@ -3159,135 +3162,121 @@ stateDiagram-v2
     FAMILIAR --> LEARNING : 遗忘 lapses
     PROFICIENT --> LEARNING : 遗忘 lapses
     MASTERED --> PROFICIENT : 长期未复习衰减
-    MASTERED --> [*] : 毕业后拉长间隔至 240 天
+    MASTERED --> [*] : 毕业后进入 60→120→240 天低频维护
 ```
 
-**掌握度 `masteryScore` (0-100) 与六状态阈值**
+**掌握度 `masteryScore` (0-100) 与六状态阈值（Phase 1 实现口径 · 追认）**
 
 | 状态 | masteryScore | 含义 |
 | --- | --- | --- |
-| `NEW` | — (未学习，`learnCount = 0`) | 未学习 |
-| `STRANGER` | 0 – 19 | 陌生 |
-| `LEARNING` | 20 – 44 | 初步掌握 |
-| `FAMILIAR` | 45 – 69 | 熟悉 |
-| `PROFICIENT` | 70 – 89 | 熟练 |
+| `NEW` | — (`learnCount = 0`，未学习) | 未学习 |
+| `STRANGER` | 0 – 24 | 陌生 |
+| `LEARNING` | 25 – 49 | 初步掌握 |
+| `FAMILIAR` | 50 – 74 | 熟悉 |
+| `PROFICIENT` | 75 – 89 | 熟练 |
 | `MASTERED` | 90 – 100 | 完全掌握 |
+
+> 实现见 `srs.constants.ts:9-15` `STAGE_THRESHOLDS = { STRANGER: 0, LEARNING: 25, FAMILIAR: 50, PROFICIENT: 75, MASTERED: 90 }`。
+> **阈值本身不影响调度**（间隔由 `reps` + `easeFactor` 决定，与 stage 标签解耦），仅影响 UI 标签与统计分布，故差异风险为零。
+
 
 #### 5.1.2 输入与输出
 
 ```ts
+export type SelfRating = 0 | 1 | 2 | 3 | 4 | 5
+export type MasteryStage = 'NEW' | 'STRANGER' | 'LEARNING' | 'FAMILIAR' | 'PROFICIENT' | 'MASTERED'
+export type ReviewPath = 'LAPSE' | 'ADVANCE' | 'MASTERED'
+
 export interface SrsState {
   masteryScore: number      // 0-100
-  easeFactor: number        // 2.5 默认，范围 [1.3, 2.8]
-  intervalDays: number      // 上次间隔天数，0 = 首次
+  stage: MasteryStage
+  easeFactor: number        // SM-2 EF，默认 2.5，clamp [1.3, 2.8]
+  intervalDays: number      // 上次间隔天数
   reps: number              // 连续成功次数
   lapses: number            // 遗忘次数
   consecutiveCorrect: number
   avgResponseMs: number
-  learnCount: number      // 0 表示尚未学习
 }
 export interface SrsEvent {
-  rating: 0|1|2|3|4|5       // 0 完全不会 /1 陌生 /2 初步 /3 熟悉 /4 熟练 /5 完全掌握
+  rating: SelfRating        // 0 完全不会 … 5 完全掌握；>=2 视为答对
   responseMs: number
-  source: ReviewSource
+  now?: Date
 }
-export interface SrsResult {
-  masteryScore: number
-  masteryStage: MasteryStage
-  intervalDays: number
-  nextReviewAt: Date
-  easeFactor: number
-  reps: number
-  lapses: number
-  reason: 'LAPSE' | 'REPEAT' | 'ADVANCE' | 'MASTERED'
+export interface SrsOutcome extends SrsState {
+  path: ReviewPath          // 三条路径，对应实现的 LAPSE / ADVANCE / MASTERED
+  nextReviewAt: Date        // = now + intervalDays*86400_000
+  isCorrect: boolean
 }
 ```
 
-#### 5.1.3 公式（伪代码，可直接实现）
+
+#### 5.1.3 公式（Phase 1 实现口径 · 伪代码与 `srs.formula.ts` 一一对应）
+
+> 以下为**已落地实现**的等价伪代码（`src/services/vocabulary/srs/srs.formula.ts` + `srs.constants.ts`）。与 v1.1 文档稿的差异见 §5.1.4 裁决表。
 
 ```ts
-// src/services/vocabulary/srs/srs.engine.ts
-export const LADDER_DAYS = [0, 1, 3, 7, 14, 30, 60, 120, 240]  // 0 = 当天 10 分钟后再来
-const SAME_ROUND_MINUTES = 10
-const MIN_EASE = 1.3
-const MAX_EASE = 2.8
+// src/services/vocabulary/srs/srs.constants.ts
+export const ADVANCE_INTERVALS = [1, 3, 7, 14, 30] as const   // 答对推进阶梯（天）
+export const STAGE_THRESHOLDS = { STRANGER: 0, LEARNING: 25, FAMILIAR: 50, PROFICIENT: 75, MASTERED: 90 } as const
+export const EASE_MIN = 1.3, EASE_MAX = 2.8, EASE_DEFAULT = 2.5
+export const MASTERY = { correctBase: 12, wrongPenalty: 25, speedBonus: 4, slowPenalty: 3 } as const
+export const RESPONSE_FAST_MS = 4000      // < 4s 视为快速作答
+export const RESPONSE_SLOW_MS = 12000     // > 12s 视为反应迟缓
 
-function stageOf(score: number, learnCount: number): MasteryStage {
-  if (learnCount === 0) return 'NEW'
-  if (score < 20) return 'STRANGER'
-  if (score < 45) return 'LEARNING'
-  if (score < 70) return 'FAMILIAR'
-  if (score < 90) return 'PROFICIENT'
-  return 'MASTERED'
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+function stageFromMastery(mastery: number): MasteryStage {
+  if (mastery >= STAGE_THRESHOLDS.MASTERED) return 'MASTERED'
+  if (mastery >= STAGE_THRESHOLDS.PROFICIENT) return 'PROFICIENT'
+  if (mastery >= STAGE_THRESHOLDS.FAMILIAR) return 'FAMILIAR'
+  if (mastery >= STAGE_THRESHOLDS.LEARNING) return 'LEARNING'
+  return 'STRANGER'
 }
 
-function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, v)) }
+const nextReviewFrom = (now: Date, d: number) => new Date(now.getTime() + d * 86_400_000)
 
-/** 反应时长因子：越快加权越大，区间 [0.8, 1.2] */
-function timeFactor(responseMs: number) {
-  return clamp(1.2 - responseMs / 10000, 0.8, 1.2)
-}
+export function advance(state: SrsState, rating: SelfRating, responseMs: number, now = new Date()): SrsOutcome {
+  const isCorrect = rating >= 2
+  const q = clamp(rating, 0, 5)
 
-/** SM-2 的 EF 更新 EF' = EF + (0.1 - (5-q)*(0.08+(5-q)*0.02)) */
-function nextEase(ef: number, q: number) {
-  const d = 5 - q
-  return clamp(ef + (0.1 - d * (0.08 + d * 0.02)), MIN_EASE, MAX_EASE)
-}
+  // ---- ① EF：SM-2 原始公式（与文档 v1.1 逐字一致）----
+  const newEase = clamp(state.easeFactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)), EASE_MIN, EASE_MAX)
 
-export function nextSchedule(state: SrsState, ev: SrsEvent, now: Date): SrsResult {
-  const q = ev.rating
-  const tf = timeFactor(ev.responseMs)
-
-  // ---- ① 掌握度更新 ----
-  let mastery = state.masteryScore
-  if (q >= 2) {
-    // 答对：基础增益 12，受反应速度调节；的历史错误不做惩罚
-    mastery = clamp(mastery + Math.round(12 * tf * (q >= 4 ? 1.25 : 1)), 0, 100)
+  // ---- ② 掌握度：离散时间因子（Phase 1 简化，见裁决 A-3）----
+  const timeFactor = responseMs > 0 && responseMs < RESPONSE_FAST_MS ? MASTERY.speedBonus
+                  : responseMs > RESPONSE_SLOW_MS ? -MASTERY.slowPenalty : 0
+  let newMastery: number
+  if (isCorrect) {
+    const ratingWeight = rating >= 4 ? 1.2 : rating === 3 ? 1 : 0.6
+    newMastery = clamp(state.masteryScore + Math.round((MASTERY.correctBase + timeFactor) * ratingWeight), 0, 100)
   } else {
-    // 答错/陌生：惩罚 18，并额外按过去连错加重（最多再 -12）
-    const lapsePenalty = Math.min(12, state.lapses >= 3 ? 12 : state.lapses * 4)
-    mastery = clamp(mastery - 18 - lapsePenalty, 0, 100)
+    newMastery = clamp(state.masteryScore - MASTERY.wrongPenalty, 0, 100)
   }
 
-  const ease = nextEase(state.easeFactor, q)
-  let intervalDays: number
-  let reps = state.reps
-  let lapses = state.lapses
-  let reason: SrsResult['reason']
-
-  // ---- ② 间隔更新 ----
-  if (q < 2) {
-    // LAPSE：当天同一轮再来一次，重置 reps，间隔归零
-    reps = 0
-    lapses = state.lapses + 1
-    intervalDays = 0
-    reason = 'LAPSE'
-  } else {
-    reps = state.reps + 1
-    reason = 'ADVANCE'
-    // 找到当前间隔在阶梯上的位置
-    const curIdx = Math.max(0, LADDER_DAYS.findIndex(d => d >= state.intervalDays))
-    // 自评越高，跨的阶梯越多
-    const step = q >= 5 ? 2 : q >= 4 ? 1 : q === 3 ? 1 : 0
-    // 注意：q===2 时 step=0 → 保持当前间隔但至少 1 天后（同日不多于一次复习）
-    const nextIdx = clamp(curIdx + step, 0, LADDER_DAYS.length - 1)
-    const base = Math.max(LADDER_DAYS[nextIdx], q === 2 ? 1 : 1)
-    // 用 easeFactor 与反应速度做微调，保留 SM-2 的"掌握越牢间隔越长"特性
-    intervalDays = Math.max(1, Math.round(base * (ease / 2.5) * tf))
-    if (reason === 'ADVANCE' && mastery >= 90) { reason = 'MASTERED'; intervalDays = Math.max(intervalDays, 30) }
+  // ---- ③ 路径 A：LAPSE（答错）→ 间隔回 1 天，EF 惩罚，reps 清零 ----
+  if (!isCorrect) {
+    return { ...state, masteryScore: newMastery, stage: stageFromMastery(newMastery), easeFactor: newEase,
+             intervalDays: 1, reps: 0, lapses: state.lapses + 1, consecutiveCorrect: 0,
+             path: 'LAPSE', nextReviewAt: nextReviewFrom(now, 1), isCorrect }
   }
 
-  const nextReviewAt = intervalDays === 0
-    ? new Date(now.getTime() + SAME_ROUND_MINUTES * 60_000)
-    : startOfUserLocalDay(addDays(now, intervalDays))   // 次日凌晨到期，符合"今天的任务今天刷完"心智
+  const reps = state.reps + 1
+  const consecutiveCorrect = state.consecutiveCorrect + 1
 
-  return {
-    masteryScore: mastery,
-    masteryStage: stageOf(mastery, state.learnCount + 1),
-    intervalDays, nextReviewAt, easeFactor: ease,
-    reps, lapses, consecutiveCorrect: q >= 2 ? state.consecutiveCorrect + 1 : 0,
-    reason,
+  // ---- ④ 路径 B：MASTERED（毕业）→ mastery ≥ 90 且连续 3 次答对 → 间隔 45 天 ----
+  if (newMastery >= STAGE_THRESHOLDS.MASTERED && consecutiveCorrect >= 3) {
+    return { ...state, masteryScore: newMastery, stage: 'MASTERED', easeFactor: newEase,
+             intervalDays: 45, reps, lapses: state.lapses, consecutiveCorrect,
+             path: 'MASTERED', nextReviewAt: nextReviewFrom(now, 45), isCorrect }
   }
+
+  // ---- ⑤ 路径 C：ADVANCE → 查表 × EF 缩放（EF ∈ [1.3,2.8] → 系数 ∈ [0.76, 1.06]）----
+  const tableIndex = Math.min(reps - 1, ADVANCE_INTERVALS.length - 1)
+  const baseInterval = ADVANCE_INTERVALS[tableIndex] ?? 30
+  const scaled = Math.max(1, Math.round(baseInterval * (0.5 + (newEase / 2.5) * 0.5)))
+  return { ...state, masteryScore: newMastery, stage: stageFromMastery(newMastery), easeFactor: newEase,
+           intervalDays: scaled, reps, lapses: state.lapses, consecutiveCorrect,
+           path: 'ADVANCE', nextReviewAt: nextReviewFrom(now, scaled), isCorrect }
 }
 ```
 
@@ -3295,20 +3284,110 @@ export function nextSchedule(state: SrsState, ev: SrsEvent, now: Date): SrsResul
 
 | 规则 | 说明 |
 | --- | --- |
-| 新学威 queue | 每日新词上限 = `min(plan.vocabCount, 60)`；新词与复习词穿插呈现（每学 5 个新词插 3 个复习词） |
+| 新学词队列 | 每日新词上限 = `min(plan.vocabCount, 60)`；新词与复习词穿插呈现（每学 5 个新词插 3 个复习词） |
 | 到期判定 | `nextReviewAt <= now`（服务端 UTC 比较），队列排序 `nextReviewAt ASC, wrongCount DESC` |
-| 复习未完成 | 到期未完成不惩罚；但连续 3 天未复习该词 → `lapses += 1`，但不降低 mastery（避免"不用心也掉分"的挫败感） |
-| 首次学习 | `learnCount=0` → 学习正确直接给 `masteryScore = 25`，第一次复习安排在 **1 天后** |
-| 完全掌握的毕业 | `masteryScore ≥ 90 且 intervalDays ≥ 120` → 移出日常队列，仍计入"掌握词数" |
-| 幂等 | 同一 `wordId + Idempotency-Key` 只推进一次，避免连点导致间隔暴涨 |
+| 首次学习 | `learnCount=0` → 学习正确给 `masteryScore = 25`（落入 `LEARNING`），第一次复习 **1 天后** |
+| 幂等 | 同一 `wordId + Idempotency-Key` 只推进一次（`vocabulary_reviews.idempotencyKey` 唯一索引），避免连点导致间隔暴涨 |
+| 复习未完成 | 到期未完成**不惩罚**；连续 3 天未复习仅 `lapses += 1`，不降 mastery（避免"不用心也掉分"的挫败感） |
+| 事件流水 | 每次推进写 `vocabulary_reviews`（append-only），含 `prevMastery/newMastery/prevInterval/newInterval/prevEase/newEase`，用于回溯与补算 |
+
+#### 5.1.4 ★ 裁决：Phase 1 简化口径 vs Phase 2 增强点（QA 问题 #1）
+
+**裁决：A（追认简化）为主 + B（回改 1 项承重结构）**
+
+| # | 项 | v1.1 文档 | Phase 1 实现 | 裁决 | 理由 |
+| --- | --- | --- | --- | --- | --- |
+| A-1 | 阶段阈值 | 20/45/70/90 | 25/50/75/90 | **A 追认** | 阈值与调度**解耦**（间隔只由 `reps`+`EF` 决定），仅影响 UI 标签与分布统计，零行为风险。25/50/75 的等距划分对用户更直观 |
+| A-2 | `wrongPenalty` | `-18 - lapsePenalty(≤12)` | 固定 `-25` | **A 追认** | 动态惩罚会让"lapses 多的词"反复掉到 0 附近，Phase 1 缺乏调参数据支撑，固定值更可预测、更易单测 |
+| A-3 | `timeFactor` | 连续 `clamp(1.2 - ms/10000, 0.8, 1.2)` | 离散 `+4 / 0 / -3` | **A 追认** | 离散实现对"熟练度"的影响更可解释（快=加分、慢=扣分），且避免连续浮点在边界反复抖动；SM-2 体系本身也不使用连续时间因子 |
+| **B-1** | **间隔阶梯长尾** | `[0,1,3,7,14,30,60,120,240]` | `[1,3,7,14,30]` 封顶 | **⚠️ B 必须回改（Phase 2 P0）** | **这是承重结构，见下方量化论证** |
+| B-2 | 毕业间隔 | ≥120 天 | 45 天 | **B 部分回改（Phase 2 P1）** | 45 天可跑通闭环，但会让"已掌握词"长期占用复习队列；建议随 B-1 一并延长至 `60 → 120 → 240` 三级阶梯 |
+| B-3 | LAPSE 同轮重试 | 0 天（10 分钟后） | 1 天 | **A 追认（记为 Phase 2 增强）** | 同轮重试会打乱"今日复习队列"的计数与完成率判定（M3），Phase 1 不引入；Phase 2 以"队列内重排"而非"改 nextReviewAt"的方式实现，可完全规避该副作用 |
+
+**B-1 量化论证（为什么间隔阶梯不能封顶在 30 天）**
+
+设用户已掌握词量 `W`，平均复习间隔 `I` 天 → 稳态日复习量 ≈ `W / I`：
+
+| 方案 | 阶梯 | W=5000（CET-4 全量） | W=20000（含 CET-6） | 按 8s/词折算 |
+| --- | --- | --- | --- | --- |
+| Phase 1 实现（封顶 30 天 + EF 缩放 ≤1.06 → 实际 ~32 天） | 1/3/7/14/30 | **~167 词/天** | **~667 词/天** | **22 min / 89 min** |
+| 文档口径（含 60/120/240 长尾，均值 ~120 天） | …/60/120/240 | **~42 词/天** | **~167 词/天** | **5.6 min / 22 min** |
+
+- **M2 成功指标 = 22 min/DAU**。按实现口径，**仅词汇维护一项就吃满 100% 的时间预算**（5000 词时），听力/口语/阅读/写作全部无处安放 → **M3 计划完成率必然崩塌**。
+- 5000 词规模下，长尾阶梯把词汇维护从 **22 min 压到 5.6 min**，释放的 16.4 min 正好容纳听力+口语+阅读+写作四类任务（§5.2 预算）。
+- 因此 **B-1 不是代码风格问题，是产品指标能否成立的问题**，必须回改。
+
+**Phase 2 增强点清单（写入 Backlog，不在 Phase 1 范围）**
+
+| ID | 增强项 | 目标 | 优先级 |
+| --- | --- | --- | --- |
+| SRS-P2-1 | `ADVANCE_INTERVALS` 扩展为 `[1,3,7,14,30,60,120,240]`，毕业改为 `60 → 120 → 240` 三级递进 | 稳态复习量降至 1/4，保住 M2 预算 | **P0** |
+| SRS-P2-2 | `LEARNING/review` 队列内"答错词本轮末尾重排"（**不改 `nextReviewAt`**） | 提升短期巩固，同时不污染 M3 完成率 | P1 |
+| SRS-P2-3 | `lapses ≥ 2` 的词触发 `MASTERY` 惩罚递增（恢复文档的动态惩罚） | 长期顽固错词更快回落 | P1 |
+| SRS-P2-4 | 依据 `avgResponseMs` 的分位数（而非固定 4s/12s 阈值）动态标定快慢边界 | 消除"快慢"的主观阈值 | P2 |
+| SRS-P2-5 | 复习负担预测：`Σ (1/I_i) × 8s` 作为每日复习 ETA 展示在 `/vocabulary/review` | 用户可预期、可调节 | P2 |
 
 ### 5.2 每日任务生成算法（输入：目标/可用时间/弱项）
 
+> **口径声明（v1.2 裁决，QA 问题 #9）**：**A 追认 Phase 1 线性分配**，但**本节承诺不删除**——权重式算法作为 **Phase 2 P0** 实现，规格见 §5.2.2。
+>
+> **裁决的关键依据（这是"数据时序约束"，不是"实现偷懒"）**：`abilityVector` 的唯一写入点是 `placement.service.ts:224`，即**用户完成 Placement Test 之后**。而 Onboarding（第 3 步）在 PRD 主路径中**先于** Placement Test：
+>
+> ```
+> Landing → 注册 → Onboarding(8步) → Placement Test → AI 学习计划
+>                    ↑                    ↑
+>             首周任务在此生成      abilityVector 在此才产生
+> ```
+>
+> 因此在 `generateFirstWeekTasks()` 被调用的时刻，**弱项数据在物理上尚不存在**，权重算法无法运行。当前线性分配的 `dailyMinutes × 固定系数`（`onboarding.service.ts:115-117`：词汇 0.4 / 复习 0.3 / 阅读 0.3）是该时点下**唯一可用的正确解**。
+
+#### 5.2.1 Phase 1 口径（已落地 · 追认）
+
+```ts
+// src/services/onboarding.service.ts · generateFirstWeekTasks()
+const vocabCount   = Math.max(5,  Math.round(dailyMinutes * 0.4))   // 词汇：新词
+const reviewCount  = Math.max(10, Math.round(dailyMinutes * 0.3))   // 复习：到期词
+const readingMin   = Math.max(5,  dailyMinutes - Math.round(dailyMinutes * 0.7))  // 阅读：剩余分钟
+// 7 天 × 3 类；已存在任务的日期跳过（幂等）
+```
+
+| 项 | Phase 1 实际行为 | 说明 |
+| --- | --- | --- |
+| 任务种类 | 仅 `VOCAB` + `REVIEW` + `READING` 三类 | 听力/口语/写作任务待 Phase 2 |
+| 分配依据 | 仅 `dailyMinutes` 线性 | 无弱项差异化（数据尚不存在） |
+| 天数 | 7 天（`date` 本地日期，UTC 口径 `dateOffset`） | 与 §5.1 `nextReviewAt` 口径一致 |
+| 幂等 | 先查已有 `date` 集合，命中则跳过 | ✅ 已实现 |
+| 完成率自适应 | ❌ 未实现 | Phase 2（依赖 §5.6 的 `history`） |
+
+**产品影响评估（诚实结论）**
+
+| 维度 | 影响 | 严重度 |
+| --- | --- | --- |
+| 闭环可用性 | ✅ 无影响。注册→测评→看板→学词全链路通，7 天任务足够撑起 D1–D7 留存 | — |
+| PRD 卖点"千人千面" | ⚠️ **首周未体现**。所有同 `dailyMinutes` 的用户首周任务完全一致 | 中（Phase 2 补齐） |
+| M3 完成率 ≥60% | ✅ 反而**更有利**：线性分配目标可完成度高，权重分配在能力数据不足时易产生"听不懂的听力任务"导致完成率塌陷 | — |
+| A7 `PLAN_GENERATE`（AI 计划） | ✅ 不受影响。AI 计划走 `POST /api/study-plan/generate`（§3.5.3 #28），可在 Placement 之后运行 | — |
+
+> **一句话结论**：Phase 1 的线性分配在"Placement 之前"这个时点是**正确工程决策**，而非功能缺失；真正缺失的是**权重算法本身**，已列为 Phase 2 P0。
+
+#### 5.2.2 Phase 2 规格（权重式任务生成 · P0 · 不删承诺）
+
+**触发时机（关键变更）**：Phase 2 的权重式任务生成**不在 Onboarding 阶段触发**，而在以下三个时机之一：
+
+```ts
+export type PlanRegenerateTrigger =
+  | { kind: 'PLACEMENT_COMPLETED' }                       // Placement 交卷后立即重算剩余首周任务
+  | { kind: 'DAILY_CRON' }                                // 每日 06:00（用户本地时区）滚动生成次日任务
+  | { kind: 'PLAN_ADJUST'; reason: string }              // §5.6 计划调整时重算
+```
+
+**算法规格（保持原设计不变）**
+
 ```ts
 export interface PlanInput {
-  dailyMinutes: number                    // user_settings 或 onboarding 采集
+  dailyMinutes: number
   weeklyDays: number
-  ability: AbilityVector                  // 0-100 六维
+  ability: AbilityVector                  // 0-100 六维，Phase 2 起由 Placement 填充
   goal: { examType: ExamType; targetScore?: number; targetDate?: Date }
   history: { avgCompletionRate: number; last7Completion: number[] }
   dueReviewCount: number
@@ -3323,24 +3402,35 @@ export function generateDailyTasks(i: PlanInput): DailyTask[] {
   for (const [k] of sorted.slice(0, 2)) w[k] += 0.08
   for (const [k, v] of Object.entries(i.ability)) if (v >= 85) w[k] -= 0.05
   // ② 考试目标加权：CET4/6 目标者加大阅读+听力，口语权重让位
-  if ([ 'CET4', 'CET6' ].includes(i.goal.examType)) { w.READING += 0.05; w.LISTENING += 0.05; w.SPEAKING -= 0.10 }
+  if (['CET4', 'CET6'].includes(i.goal.examType)) { w.READING += 0.05; w.LISTENING += 0.05; w.SPEAKING -= 0.10 }
   // ③ 完成率自适应
   const M = Math.round(i.dailyMinutes * (i.history.avgCompletionRate < 0.5 ? 0.8 : 1))
-  const normalize = () => { const s = Object.values(w).reduce((a, b) => a + b, 0); for (const k in w) w[k] /= s }
-  normalize()
-
+  const sum = Object.values(w).reduce((a, b) => a + b, 0)
+  for (const k in w) w[k] /= sum
   return [
-    { type: 'VOCAB',    target: clamp(Math.round(M * w.VOCAB * 1.2), 10, 60), unit: 'word' },   // ~1.2 词/分钟
-    { type: 'REVIEW',   target: Math.min(i.dueReviewCount, Math.round(M * w.VOCAB * 0.8) + 10), unit: 'word' },
-    { type: 'LISTENING',target: Math.max(Math.round(M * w.LISTENING), 5),            unit: 'minute' },
-    { type: 'READING',  target: clamp(Math.round(M * w.READING / 8), 1, 5),          unit: 'piece' }, // ~8min/篇
-    { type: 'WRITING',  target: clamp(Math.round(M * w.WRITING / 25), 0, 2),         unit: 'piece' }, // ~25min/篇
-    { type: 'SPEAKING', target: Math.max(Math.round(M * w.SPEAKING), 0),             unit: 'minute' },
+    { type: 'VOCAB',     target: clamp(Math.round(M * w.VOCAB * 1.2), 10, 60), unit: 'word' },   // ~1.2 词/分钟
+    { type: 'REVIEW',    target: Math.min(i.dueReviewCount, Math.round(M * w.VOCAB * 0.8) + 10), unit: 'word' },
+    { type: 'LISTENING', target: Math.max(Math.round(M * w.LISTENING), 5), unit: 'minute' },
+    { type: 'READING',   target: clamp(Math.round(M * w.READING / 8), 1, 5), unit: 'piece' },   // ~8min/篇
+    { type: 'WRITING',   target: clamp(Math.round(M * w.WRITING / 25), 0, 2), unit: 'piece' },  // ~25min/篇
+    { type: 'SPEAKING',  target: Math.max(Math.round(M * w.SPEAKING), 0), unit: 'minute' },
   ].filter(t => t.target > 0)
 }
 ```
 
+**验收标准（Phase 2）**
+
+| # | 标准 |
+| --- | --- |
+| 1 | Placement 交卷后，**未完成的**首周任务被权重重算（已完成的**不动**，保证 M3 口径稳定） |
+| 2 | 弱项用户（`listening=30`）的每日听力分钟数显著高于强项用户（`listening=90`），差异 ≥ 2 倍 |
+| 3 | CET4/6 目标用户的任务结构中 `SPEAKING` 占比 ≤ 5%，`READING + LISTENING` ≥ 45% |
+| 4 | `avgCompletionRate < 0.5` 的用户总时长自动降档 20% |
+| 5 | 生成算法为**纯函数**，单测覆盖 4 条分支（弱项/强项/CET 加权/完成率降档） |
+| 6 | 幂等：同 `(userId, date, taskType)` 不重复建行；重跑覆盖未完成任务 |
+
 **周目标 = 每日目标 × `weeklyDays`（保留 15% 弹性缓冲），剩余天数按 `Math.round(total/7)` 摊薄，保证哪怕只学 5 天也能接近周目标。**
+
 
 ### 5.3 推荐引擎规则（弱项优先 + 难度渐进 + 去重）
 
@@ -4833,7 +4923,7 @@ npm run enums:sync   # 读 prisma/schema.prisma → 生成 src/types/enums.ts（
 
 ## 摘要（300 字内）
 
-本文档给出 EnglishAI 智能英语学习平台**可直接落地的完整技术架构**：单体 Next.js 15.5.26 + Prisma 6.19.3 起步，含 ADR-001 拆分路径；**52 张表的完整 Prisma schema**（用户/内容/学习/考试/AI/运营六域）；**140 条 REST API**（统一 envelope + 30 个错误码 + SSE 流式规范）；**AI Gateway** 以 18 个能力对齐 PRD A1–A18，Provider 可插拔并带 Failover、Zod 结构化校验与逐能力降级矩阵；核心算法给出可实现的 SRS（SM-2 变体 + 六状态）、任务生成、推荐、XP/Streak 与 CEFR→CET 映射；**T01–T10 十个有序任务**确保 Phase 1 跑通"注册→测评→看板→学单词"。**关键修订**：本机无 Docker、无系统 PostgreSQL，已 `npm install` 实测 **Tier A 内嵌 PostgreSQL 18.4**（`embedded-postgres@18.4.0-beta.17`）在中文路径下成功启动（`SELECT version()` → `PostgreSQL 18.4 on x86_64-windows`，首次 ≈16–25s，占用 107MB+48MB），并用 **Prisma 6.19.3** 完成建表 + 原生 enum + JSONB 查询的端到端验证；全依赖已按 `npm view` 实测结果**精确锁定**（`prisma` 的 `latest` 指向 `8.0.0-rc.17` 预发布版，严禁用 `^`/`latest`），并给出版本锁定与升级策略、Node 22 LTS 基线结论、以及 Tier A/C/B 三档数据库决策树。
+本文档给出 EnglishAI 智能英语学习平台**可直接落地的完整技术架构**：单体 Next.js 15.5.26 + Prisma 6.19.3 起步，含 ADR-001 拆分路径；**52 张表完整 Prisma schema**；**140 条 REST API**（统一 envelope + 30 错误码 + SSE 流式）；**AI Gateway** 以 18 能力对齐 A1–A18，Provider 可插拔并带 Failover、Zod 结构化校验与逐能力降级矩阵；核心算法含 SRS（SM-2 变体 + 六状态）、任务生成、推荐、XP/Streak、CEFR→CET 映射；**T01–T10 十个有序任务**确保 Phase 1 跑通"注册→测评→看板→学单词"。**v1.1 关键修订**：本机无 Docker/PG，已实测 **Tier A 内嵌 PostgreSQL 18.4**（`embedded-postgres`）+ **Prisma 6.19.3** 全链路（含中文路径、原生 enum、JSONB）；依赖全部精确锁定（`prisma` 的 latest 是 `8.0.0-rc.17` 预发布，严禁 `^`）。**v1.2 裁决**：§5.1 SRS 采 A 追认（阈值 25/50/75/90、离散时间因子、固定扣分）+ **B 回改 1 项承重结构**——间隔阶梯不得封顶 30 天，否则 5000 词稳态复习量达 167 词/天、吃满 M2 的 22min 预算，长尾阶梯可压到 42 词/天；§5.2 任务生成追认 Phase 1 线性分配（**Placement 之前 `abilityVector` 物理上不存在**，线性是唯一正确解），权重算法列为 Phase 2 P0 并保留完整规格与验收标准。
 
 
 

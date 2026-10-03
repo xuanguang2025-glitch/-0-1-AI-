@@ -162,3 +162,107 @@ Streak（calcStreakDays, level.ts:32-46）: 逻辑正确（今天未学不打断
 ## 结论
 
 **YES WITH CONDITIONS**：建议 (1) 工程师修复 6 项 P1（预计半天内：数值常量对齐 + rotateSession 条件更新）；(2) 架构师对 #1/#9 简化口径追认或回改；(3) E2E 在 3000 空闲窗口实跑复核后关闭条件。
+
+---
+---
+
+# 第二轮复验（Round 2 · 2026-10-03）
+
+- **复验对象**: commit `afba52d`（34 文件，+1103/-273，未 push）+ 架构师对 #1/#9 的裁决（docs v1.2，工作区 modified，未计入 diff）
+- **复验人**: 严过关（Edward）· 仍未修改任何 `src/` 业务代码
+- **环境约束遵守**: 3000 端口未触碰、未跑 `next build`、未清 `.next`、未 commit/push；覆盖率命令加 `--coverage.clean=false`
+
+## 复验结论：**PASS（6 项 P1 全部真落地，无回归）**
+
+P1 全部修复且经独立数值交叉验证，非"仅测试通过"。另发现 **1 项 MAJOR（P2→升级）**：CI 覆盖率门禁配置失效。
+
+## 一、回归基线（工程师声称 vs 实测）
+
+| 项目 | 声称 | 实测 | 判定 |
+| --- | --- | --- | --- |
+| `npx vitest run` | 105/105 | **105 passed (7 files)**：srs 26 + cefr 31 + level 17 + rate-limit 10 + date 9 + streak 6 + ai-mock 6 | ✅ 复现 |
+| `npx tsc --noEmit` | 0 错 | 0 错（exit 0） | ✅ 复现 |
+| `npm run lint` | 0 错 | `✔ No ESLint warnings or errors` | ✅ 复现 |
+| 关键算法覆盖 | ≥80% | srs.formula/engine/constants 100%、level.ts 100%、placement.service 32.5%（纯函数全覆盖，DB 流程未覆盖属正常） | ✅ 见问题 R-1 |
+
+## 二、P1 六项逐条复验
+
+### #2 维度权重 30/30/25/15 —— [PASS]
+- `placement.service.ts:44-50` 提取 `DIMENSION_WEIGHTS = {vocabulary:0.3, grammar:0.3, reading:0.25, listening:0.15}`
+- **抽题配比复用同一常量** ✅：`allocateQuestionCounts()`（service:159-182）按权重最大余额法分配，`startTest` 的 plan 直接取该函数结果（原硬编码 `[12,7,6,5]` 已删）
+- 独立验证：`allocateQuestionCounts(30)` → 9/9/8/4，总和守恒；cefr.spec:39-55 断言语法=30、听力=15 与旧值区分
+- 题池不足改为 `log.warn` 显式告警（service:186-190），不再静默缩水 ✅
+
+### #3 CEFR 88/78/65/50/33 + C2 —— [PASS]
+- `scoreToCefr`（service:71-78）五段阈值与文档 §5.5 逐字一致，含 C2 顶档
+- `cefr.spec.ts` 已重写为文档值（31 例，含边界 33/50/65/78/88 及 `scoreToCefr(99.9)='C2'`）
+- **独立复算交叉验证**（不依赖被测代码，按文档公式在 node 内重算 10 个分数点）：overall=33→A2、50→B1、65→B2、78→C1、88→C2，与实现逐点一致 ✅
+
+### #4 estimateCet 查表 + ×0.92 + clamp[220,700] —— [PASS]
+- `CET_BASE`（A1 220…C2 660）、`BAND_CENTER`（20/42/58/72/84/94）、`CET_MIN=220`/`CET_MAX=700` 全部按 §5.5 常量落地（service:83-140）
+- `estimateCetFor` = `base + round(0.5*(overall-BAND_CENTER[level]))`，CET-6 走 `*0.92`，末端 `clamp` ✅
+- **独立复算**：10 个分数点的 cet4/cet6 与实现完全一致（如 overall=88 → C2 → cet4=657 / cet6=604）✅
+
+### #6 LEVEL_THRESHOLDS —— [PASS]
+- `level.ts:14` `LEVEL_THRESHOLDS = [0,500,1500,3500,7000,15000]`，附 `LEVEL_NAMES` 六档名称与文档逐行对应
+- `levelFromXp`/`totalXpForLevel`/`levelProgress` 重写，**满级收敛正确**（level ≥ MAX_LEVEL 时 progressPct=100、xpToNext=0，不再出现旧实现的除零/递增到 100 级）
+- `level.spec.ts` 重写为阈值表断言（17 例）
+
+### #7 XP 2/1/5/80 + 每日上限 —— [PASS]（**已验证非摆设**）
+- `XP_REWARDS = {learn_word:2, review_word:1, complete_task:5, exam_submit:80}`（level.ts:79-88）✅
+- **重点核验上限是否真生效**：`REVIEW_XP_DAILY_CAP=100` 不是死常量——`reviewXpAward()`（level.ts:96-108）按 `correctReviewsToday < 100` 判定，且已接线到真实业务路径：`vocabulary.service.ts:21-28` `resolveReviewXp()` 查当日 `isCorrect=true` 的复习数后调用 ✅
+- 上限逻辑含 `!isCorrect → 0`（答错不给分）✅
+
+### #11 rotateSession 并发窗口 —— [PASS]（**已构造并发测试实证**）
+- 实现改为交互式事务内 `updateMany({ where: { id, revokedAt: null } })` 原子抢占，`claimed.count === 0` → 事务回滚 → `revokeFamily(familyId)` + 抛 `AUTH_SESSION_REVOKED`（session.ts:88-115）
+- **独立构造真实 PG 并发测试**（临时 spec，连 localhost:5433 真实库，未改业务代码，测毕已删除）：
+  - 2 并发同 token → `fulfilled=1 / rejected=1 code=AUTH_SESSION_REVOKED`，族内 `alive sessions=0` ✅
+  - **8 并发压力放大** → `fulfilled=1 revoked=7`（只有一方抢到）✅
+  - 串行重放（复用已撤销 token）→ `AUTH_SESSION_REVOKED` + 整族撤销 ✅
+- **TOCTOU 窗口已消除**，无回归
+
+## 三、两处偏离 QA 建议的处置 —— 均 [ACCEPTED-DEVIATION]
+
+### #13 clientIp / TRUST_PROXY —— [ACCEPTED-DEVIATION]（等效不退化）
+- **(a) 独立核实工程师口述**：`node_modules/next/dist/server/web/spec-extension/request.d.ts` 中**确无 `ip` 字段**（grep 零命中），Next 版本 `15.5.26`。"Next 15 已移除 `request.ip`"属实，未采信口述而是查了类型定义 ✅
+- **(b) 伪造绕过路径审查**：默认 `trustProxy()=false`（仅 `TRUST_PROXY=1/true` 开启，rate-limit.ts:141-144）→ `clientIp` 直接返回 `'direct'`，**任何 `x-forwarded-for`/`x-real-ip`/`cf-connecting-ip` 均不被采信**，伪造头无效 ✅；`.env.example:27` 已显式写入 `TRUST_PROXY=0`；开启时代理头取 `split(',')[0]`，符合可信代理链惯例
+- **(c) 直连部署不退化**：`handler.ts:141-155` 在 IP 桶之外追加**身份二级桶**（`route-guards.ts` 的 `identity` 回调，登录/注册按归一化 email 归一 —— `normalizeEmail` 已 trim+lowercase，防大小写绕过），AI 路由按 userId（`userRateLimitRule`）✅；rate-limit.spec:73-95 四例覆盖默认/1/true/0 四种开关组合
+- **残留建议（P3）**：`identity` 桶当前未绑定"答对才计数"外的失败语义，且 AI 路由仅 cet-advice/diagnosis/recommend 覆盖，chat 走独立 20/min 桶——覆盖面可接受，不构成缺陷
+
+### #15 生产 fail-fast —— [ACCEPTED-DEVIATION]（两文件行为一致）
+- `jwt.ts:18-30` `resolveSecret()`：`appConfig.app.isProd` 且 secret 长度 <16 → throw；dev 走 fallback
+- `middleware.ts:41-55` `secret()`：`NODE_ENV === 'production'` 且长度 <16 → throw；dev 走 fallback
+- **两文件判定条件等价**（`appConfig.app.isProd` 即 `NODE_ENV==='production'`），阈值同为 16 位，错误信息均带 `openssl rand -base64 48` 修复指引 ✅ 仅 production 生效，dev/vitest 零配置可跑 ✅
+
+## 四、其余 P2 修复抽验 —— 全部 [PASS]
+
+| # | 判定 | 证据 |
+| --- | --- | --- |
+| #5 抽题配比 | [PASS] | `allocateQuestionCounts` 最大余额法，题池不足 `log.warn`（service:186-190） |
+| #8 时区 | [PASS] | 新增 `lib/utils/user-date.ts`（`userToday`/`todayFor`，60s 缓存），已接入 analytics/dashboard/onboarding/placement/vocabulary 五处 service；date.spec 9 例覆盖 UTC+8 跨日、跨月跨年、非法时区回退 |
+| #10 事务 | [PASS] | onboarding.service:118 `prisma.$transaction` 包裹「读已覆盖日期 + 批量写」，消除并发重复建任务 |
+| #12 内存淘汰 | [PASS] | rate-limit.ts:36-66 `MAX_BUCKETS=10_000` + 60s 周期清扫 + LRU 插入序淘汰；rate-limit.spec:43-52 压测大量 key 不抛错 |
+| #14 锁定原子性 | [PASS] | login-guard.ts:50-57 单条 `UPDATE ... CASE ... RETURNING`，读改写合并为一次原子操作 |
+| #16 AI 限流 | [PASS] | ai/chat 补 userId 桶 20/min（route:63-64）+ events() 异常包成 SSE `error` 帧带 partial 标记（route:117-126）；cet-advice/diagnosis/recommend 同步 `aiRateLimitRule` |
+| #17 类型强转 | [PASS] | 6 个动态路由改 `withAuth<unknown, unknown, { id: string }>` 标准泛型签名，`as unknown as` 已清除 |
+
+## 五、回归中新增发现
+
+### R-1（P2 · MAJOR · 路由 Engineer）CI 覆盖率门禁配置失效
+- **现象**：`vitest.config.ts` 的 `coverage.thresholds`（lines/functions/statements 80、branches 70）在实际执行中**未生效**——按配置原样跑 `npx vitest run --coverage`，即使被门禁纳入的 5 个核心文件聚合覆盖率仅 **59.33% lines / 76.92% funcs**（低于阈值 80），也**不会触发任何 ERROR、不影响 exit code**
+- **对照实验**：显式传 `--coverage.thresholds.lines=80`（其余同配置）→ 立即输出 `ERROR: Coverage for lines (59.33%) does not meet global threshold (80%)`。即**阈值对象本身没被 provider 消费**，疑似 `coverage.include` 用了相对 glob 导致 `all` 语义下 include 失效、聚合口径与阈值口径不一致
+- **影响**：CI（`.github/workflows/ci.yml:30-31` "Unit tests (coverage gate ≥80%)"）当前是**假绿**——门禁形同虚设，任何覆盖率下滑都不会让流水线失败
+- **建议修法**：改用 `coverage.thresholds: { lines: 80, ..., perFile: false }` 并显式给 `coverage.all: true` + 绝对路径 glob；修完用上述对照实验验证"能报错"再合入
+- **注**：本项是**门禁工具链缺陷**，非业务代码缺陷，不影响运行时行为，故不升 P1
+
+## 六、第二轮判定汇总
+
+| 类别 | 数量 | 明细 |
+| --- | --- | --- |
+| P1 修复 | **6/6 PASS** | #2 #3 #4 #6 #7 #11（均含独立数值复算或并发实证） |
+| 偏离处置 | **2/2 ACCEPTED** | #13（查类型定义核实 + 伪造审查 + 二级桶确认）、#15（两文件等价） |
+| P2 修复 | **7/7 PASS** | #5 #8 #10 #12 #14 #16 #17 |
+| 新增问题 | **1（P2 MAJOR）** | R-1 覆盖率门禁失效 → Engineer |
+| 回归 | **无** | tsc/lint/105 用例全绿；P1 修复未破坏既有行为 |
+
+**最终结论：YES**（R-1 属工程门禁改进项，不阻塞 Phase 1 业务交付；建议下一批次修门禁并在 3000 空闲窗口补跑 E2E 关闭最后条件）

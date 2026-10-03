@@ -58,3 +58,4 @@ check?.mjs
 dev-server.log
 coverage-qa/
 qa-coverage-out.txt
+qa-cov*.txt
