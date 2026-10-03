@@ -4,11 +4,10 @@
 import { withAuth, ok } from '@/lib/api/handler'
 import { getTestQuestions } from '@/services/placement.service'
 
-type Ctx = { params: { id: string } }
 
-export const GET = withAuth(
+export const GET = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    const questions = await getTestQuestions(ctx.auth!.userId, ctx.params.id!)
+    const questions = await getTestQuestions(ctx.auth!.userId, ctx.params.id)
     return ok({ questions }, { traceId: ctx.traceId })
   },
-) as unknown as (request: Request, context: Ctx) => Promise<Response>
+)

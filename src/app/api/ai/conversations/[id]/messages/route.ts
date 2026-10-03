@@ -15,10 +15,10 @@ async function assertOwned(id: string, userId: string): Promise<void> {
   if (!conv) throw errNotFound('会话不存在')
 }
 
-export const GET = withAuth<{ id: string }, unknown>(
+export const GET = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    await assertOwned(ctx.params.id!, ctx.auth!.userId)
-    const where = { conversationId: ctx.params.id! }
+    await assertOwned(ctx.params.id, ctx.auth!.userId)
+    const where = { conversationId: ctx.params.id }
     const [total, rows] = await Promise.all([
       prisma.aiMessage.count({ where }),
       prisma.aiMessage.findMany({
@@ -34,12 +34,12 @@ export const GET = withAuth<{ id: string }, unknown>(
 
 type DeleteInput = { messageId: string }
 
-export const DELETE = withAuth<{ id: string }, unknown>(
+export const DELETE = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    await assertOwned(ctx.params.id!, ctx.auth!.userId)
+    await assertOwned(ctx.params.id, ctx.auth!.userId)
     const input = ctx.data as DeleteInput
     await prisma.aiMessage.deleteMany({
-      where: { id: input.messageId, conversationId: ctx.params.id! },
+      where: { id: input.messageId, conversationId: ctx.params.id },
     })
     return ok(null, { traceId: ctx.traceId })
   },

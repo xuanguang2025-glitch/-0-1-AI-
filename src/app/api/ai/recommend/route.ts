@@ -3,6 +3,7 @@
  */
 import { z } from 'zod'
 import { withAuth, ok } from '@/lib/api/handler'
+import { aiRateLimitRule } from '@/lib/auth/route-guards'
 import { aiService } from '@/services/ai/ai.service'
 import type { AiRunContext } from '@/services/ai/types'
 
@@ -26,5 +27,5 @@ export const POST = withAuth(
       ai: { degraded: result.degraded, provider: result.provider, model: result.model, latencyMs: result.latencyMs },
     })
   },
-  { bodySchema: recommendSchema },
+  { bodySchema: recommendSchema, rateLimit: aiRateLimitRule('recommend') },
 )

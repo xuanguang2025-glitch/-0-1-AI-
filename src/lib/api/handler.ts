@@ -27,9 +27,10 @@ export interface AuthedContext {
   familyId: string
 }
 
-export interface ApiContext<Q, B> {
+export interface ApiContext<Q, B, P extends Record<string, string> = Record<string, string>> {
   request: Request
-  params: Record<string, string>
+  /** 动态路由参数（Next 15：Promise 已在此处 await 完毕） */
+  params: P
   query: URLSearchParams
   /** Zod 解析后的 query（schema 提供时） */
   searchParams: URLSearchParams
@@ -53,10 +54,12 @@ export interface ApiOptions<Q, B> {
   /** query 校验 schema */
   querySchema?: ZodType<Q>
   /** 限流规则 key 前缀 + 规则 */
-  rateLimit?: { key?: string; limit: number; windowMs: number }
+  rateLimit?: { key?: string; limit: number; windowMs: number; identity?: (data: B) => string | undefined }
 }
 
-type Handler<Q, B> = (ctx: ApiContext<Q, B>) => Promise<NextResponse>
+type Handler<Q, B, P extends Record<string, string> = Record<string, string>> = (
+  ctx: ApiContext<Q, B, P>,
+) => Promise<NextResponse>
 
 /** 从 cookie 头解析 token（Edge 兼容，不依赖 next/headers） */
 function readCookie(request: Request, name: string): string | undefined {
@@ -69,11 +72,21 @@ function readCookie(request: Request, name: string): string | undefined {
   return undefined
 }
 
+/**
+ * Route Handler 的第二个参数（Next 15 App Router 标准签名）。
+ * `params` 是 Promise（Next 15 起 `params`/`searchParams` 均为异步），
+ * 因此路由里写 `withAuth<Body, { id: string }>(...)` 即可拿到 `ctx.params.id`，
+ * 无需 `as unknown as` 强转（QA P2 #17）。
+ */
+export type RouteContext<P extends Record<string, string> = Record<string, string>> = {
+  params: Promise<P>
+}
+
 /** 统一包装：所有 /api route 的唯一入口 */
-export function withApi<Q = unknown, B = unknown>(
-  handler: Handler<Q, B>,
+export function withApi<Q = unknown, B = unknown, P extends Record<string, string> = Record<string, string>>(
+  handler: Handler<Q, B, P>,
   options: ApiOptions<Q, B> = {},
-): (request: Request, context?: { params?: Promise<Record<string, string>> }) => Promise<NextResponse> {
+): (request: Request, context: RouteContext<P>) => Promise<NextResponse> {
   return async (request, routeContext) => {
     const traceId = request.headers.get('x-trace-id') ?? genTraceId()
     const startedAt = Date.now()
@@ -122,9 +135,28 @@ export function withApi<Q = unknown, B = unknown>(
         const data = bodySchema && request.method !== 'GET' ? parseWith(bodySchema, await readJson(request)) : (undefined as B)
         const queryData = querySchema ? parseWith(querySchema, Object.fromEntries(searchParams)) : (undefined as Q)
 
-        const params = routeContext?.params ? await routeContext.params : {}
+        // ---- 二级限流（身份维度）----
+        // 直连部署拿不到可信客户端 IP（见 rate-limit.clientIp），IP 桶会退化为单桶，
+        // 因此对登录/注册等接口追加「邮箱 / userId」维度的桶，避免正常用户互相挤兑。
+        if (options.rateLimit?.identity) {
+          const identity = options.rateLimit.identity(data)
+          if (identity) {
+            const idResult = await hitRateLimit(`${options.rateLimit.key ?? url.pathname}:id:${identity}`, {
+              limit: options.rateLimit.limit,
+              windowMs: options.rateLimit.windowMs,
+            })
+            if (!idResult.allowed) {
+              return fail('SYS_RATE_LIMIT', {
+                traceId,
+                message: `请求过于频繁，请 ${Math.ceil(idResult.retryAfterMs / 1000)} 秒后重试`,
+              })
+            }
+          }
+        }
 
-        const ctx: ApiContext<Q, B> = {
+        const params = (routeContext?.params ? await routeContext.params : {}) as P
+
+        const ctx: ApiContext<Q, B, P> = {
           request,
           params,
           query: searchParams,
@@ -161,11 +193,11 @@ export function withApi<Q = unknown, B = unknown>(
 }
 
 /** 便捷别名：需登录接口 */
-export function withAuth<Q = unknown, B = unknown>(
-  handler: Handler<Q, B>,
+export function withAuth<Q = unknown, B = unknown, P extends Record<string, string> = Record<string, string>>(
+  handler: Handler<Q, B, P>,
   options: Omit<ApiOptions<Q, B>, 'auth'> = {},
-): (request: Request, context?: { params?: Promise<Record<string, string>> }) => Promise<NextResponse> {
-  return withApi(handler, { ...options, auth: true })
+): (request: Request, context: RouteContext<P>) => Promise<NextResponse> {
+  return withApi<Q, B, P>(handler, { ...options, auth: true })
 }
 
 export { ok, fail, genTraceId, created }

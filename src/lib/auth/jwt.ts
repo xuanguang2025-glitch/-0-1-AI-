@@ -8,10 +8,26 @@ import { appConfig } from '@/lib/constants/config'
 import { AppError } from '@/lib/api/errors'
 
 const encoder = new TextEncoder()
-const secretKey = (): Uint8Array => {
-  const secret = appConfig.auth.jwtSecret || 'englishai-dev-secret-change-in-production'
-  return encoder.encode(secret)
+
+/**
+ * JWT 签名密钥（QA P2 #15）。
+ * - 生产环境（NODE_ENV=production）缺 `AUTH_JWT_SECRET` → **启动即失败**，
+ *   绝不静默回退到仓库里的弱默认密钥（那等于任何人都能伪造登录态）。
+ * - 开发/测试环境保留 fallback，保证 `npm run dev` / `vitest` 零配置可跑。
+ */
+function resolveSecret(): string {
+  const secret = appConfig.auth.jwtSecret
+  if (secret && secret.length >= 16) return secret
+  if (appConfig.app.isProd) {
+    throw new Error(
+      '[auth] AUTH_JWT_SECRET 未配置或长度不足 16 位。生产环境拒绝使用默认弱密钥，' +
+        '请在 .env.local / 部署环境变量中设置 `AUTH_JWT_SECRET=$(openssl rand -base64 48)` 后重启。',
+    )
+  }
+  return 'englishai-dev-secret-change-in-production'
 }
+
+const secretKey = (): Uint8Array => encoder.encode(resolveSecret())
 
 export interface AccessTokenPayload extends JWTPayload {
   /** userId */

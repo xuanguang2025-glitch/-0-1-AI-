@@ -85,12 +85,16 @@ export async function rotateSession(refreshToken: string, meta: SessionMeta): Pr
   const newRefreshToken = await signRefreshToken({ sub: user.id, fid: session.familyId, jti: newJti })
   const accessToken = await signAccessToken({ sub: user.id, role: user.role, fid: session.familyId })
 
-  await prisma.$transaction([
-    prisma.authSession.update({
-      where: { id: session.id },
+  // ★ 原子声明（QA P1 #11）：条件 updateMany({ id, revokedAt: null }) 承担「抢占」语义。
+  // 并发携带同一 refresh token 的两个请求里只有一个能抢到（count===1），
+  // 另一个 count===0 说明已被撤销 → 走整族撤销分支，重放检测不再有 TOCTOU 窗口。
+  const rotated = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.authSession.updateMany({
+      where: { id: session.id, revokedAt: null },
       data: { revokedAt: new Date() },
-    }),
-    prisma.authSession.create({
+    })
+    if (claimed.count === 0) return false
+    await tx.authSession.create({
       data: {
         userId: user.id,
         tokenHash: sha256(newRefreshToken),
@@ -100,8 +104,15 @@ export async function rotateSession(refreshToken: string, meta: SessionMeta): Pr
         ip: meta.ip,
         userAgent: meta.userAgent,
       },
-    }),
-  ])
+    })
+    return true
+  })
+
+  if (!rotated) {
+    // 抢占失败 = 并发轮换或重放：撤销整个 family，强制全部设备重新登录
+    await revokeFamily(session.familyId)
+    throw new AppError('AUTH_SESSION_REVOKED')
+  }
 
   return { accessToken, refreshToken: newRefreshToken, userId: user.id, role: user.role }
 }

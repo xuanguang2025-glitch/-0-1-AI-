@@ -4,7 +4,7 @@
  */
 import { prisma } from '@/lib/db'
 import { createLogger } from '@/lib/logger/logger'
-import { localDate } from '@/lib/utils/date'
+import { userToday } from '@/lib/utils/user-date'
 import { levelProgress, calcStreakDays, xpForEvent } from './gamification/level'
 import type { AiRunContext } from './ai/types'
 import type { AiResult } from './ai/types'
@@ -25,7 +25,7 @@ export interface DashboardData {
 
 /** 聚合（8 个并行查询 + AI 1 次独立降级） */
 export async function getDashboard(userId: string, aiCtx: AiRunContext): Promise<DashboardData> {
-  const today = localDate()
+  const today = await userToday(userId)
 
   const [stats, settings, tasks, vocabAgg, dueCount, bookItem, profile, userRow] = await Promise.all([
     prisma.dailyLearningStat.findMany({
@@ -119,7 +119,7 @@ export async function completeTask(userId: string, taskId: string): Promise<{ st
   }
   if (task.status === 'COMPLETED') return { status: task.status, xpEarned: 0 }
 
-  const today = localDate()
+  const today = await userToday(userId)
   const xp = xpForEvent('complete_task')
   await prisma.$transaction([
     prisma.studyTask.update({ where: { id: taskId }, data: { status: 'COMPLETED', completedValue: task.targetValue, completedAt: new Date() } }),

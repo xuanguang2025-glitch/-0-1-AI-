@@ -5,7 +5,7 @@
 import { prisma } from '@/lib/db'
 import { errNotFound } from '@/lib/api/errors'
 import { createLogger } from '@/lib/logger/logger'
-import { localDate } from '@/lib/utils/date'
+import { userToday } from '@/lib/utils/user-date'
 import { Prisma } from '@prisma/client'
 
 const log = createLogger('onboarding.service')
@@ -104,54 +104,64 @@ export async function submit(userId: string, steps: OnboardingSteps, skipped: bo
   }
 }
 
-/** 生成首周任务：VOCAB（新词）+ REVIEW（复习）+ READING（阅读），共 7 天 */
+/**
+ * 生成首周任务：VOCAB（新词）+ REVIEW（复习）+ READING（阅读），共 7 天。
+ * 整段包在 $transaction 内（读「已覆盖日期」+ 批量写必须原子），
+ * 否则并发提交 onboarding 会重复建任务（QA P2 #10）。
+ */
 async function generateFirstWeekTasks(userId: string, dailyMinutes: number): Promise<void> {
-  const today = localDate()
-  const existing = await prisma.studyTask.findMany({
-    where: { userId, date: { gte: today, lte: dateOffset(today, 6) } },
-    select: { date: true },
-  })
-  const covered = new Set(existing.map((t) => t.date))
+  const today = await userToday(userId)
   const vocabCount = Math.max(5, Math.round(dailyMinutes * 0.4))
   const reviewCount = Math.max(10, Math.round(dailyMinutes * 0.3))
   const readingMin = Math.max(5, dailyMinutes - Math.round(dailyMinutes * 0.7))
-  const rows: Array<{
-    userId: string
-    date: string
-    taskType: 'VOCAB' | 'REVIEW' | 'READING'
-    title: string
-    targetValue: number
-    unit: string
-    sortOrder: number
-    payload: Prisma.InputJsonValue
-  }> = []
-  for (let i = 0; i < 7; i++) {
-    const date = dateOffset(today, i)
-    if (covered.has(date)) continue
-    rows.push(
-      {
-        userId, date, taskType: 'VOCAB',
-        title: `学习新词 ${vocabCount} 个`,
-        targetValue: vocabCount, unit: 'word', sortOrder: 0,
-        payload: { type: 'vocabulary_learn' } as Prisma.InputJsonValue,
-      },
-      {
-        userId, date, taskType: 'REVIEW',
-        title: '完成到期复习',
-        targetValue: reviewCount, unit: 'word', sortOrder: 1,
-        payload: { type: 'vocabulary_review' } as Prisma.InputJsonValue,
-      },
-      {
-        userId, date, taskType: 'READING',
-        title: `阅读练习 ${readingMin} 分钟`,
-        targetValue: readingMin, unit: 'minute', sortOrder: 2,
-        payload: { type: 'reading' } as Prisma.InputJsonValue,
-      },
-    )
-  }
-  if (rows.length > 0) {
-    await prisma.studyTask.createMany({ data: rows })
-    log.info({ msg: 'first-week tasks created', userId, count: rows.length })
+
+  const created = await prisma.$transaction(async (tx) => {
+    const existing = await tx.studyTask.findMany({
+      where: { userId, date: { gte: today, lte: dateOffset(today, 6) } },
+      select: { date: true },
+    })
+    const covered = new Set(existing.map((t) => t.date))
+    const rows: Array<{
+      userId: string
+      date: string
+      taskType: 'VOCAB' | 'REVIEW' | 'READING'
+      title: string
+      targetValue: number
+      unit: string
+      sortOrder: number
+      payload: Prisma.InputJsonValue
+    }> = []
+    for (let i = 0; i < 7; i++) {
+      const date = dateOffset(today, i)
+      if (covered.has(date)) continue
+      rows.push(
+        {
+          userId, date, taskType: 'VOCAB',
+          title: `学习新词 ${vocabCount} 个`,
+          targetValue: vocabCount, unit: 'word', sortOrder: 0,
+          payload: { type: 'vocabulary_learn' } as Prisma.InputJsonValue,
+        },
+        {
+          userId, date, taskType: 'REVIEW',
+          title: '完成到期复习',
+          targetValue: reviewCount, unit: 'word', sortOrder: 1,
+          payload: { type: 'vocabulary_review' } as Prisma.InputJsonValue,
+        },
+        {
+          userId, date, taskType: 'READING',
+          title: `阅读练习 ${readingMin} 分钟`,
+          targetValue: readingMin, unit: 'minute', sortOrder: 2,
+          payload: { type: 'reading' } as Prisma.InputJsonValue,
+        },
+      )
+    }
+    if (rows.length === 0) return 0
+    const result = await tx.studyTask.createMany({ data: rows })
+    return result.count
+  })
+
+  if (created > 0) {
+    log.info({ msg: 'first-week tasks created', userId, count: created })
   }
 }
 

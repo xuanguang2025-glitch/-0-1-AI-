@@ -4,11 +4,10 @@
 import { withAuth, ok } from '@/lib/api/handler'
 import { submitTest } from '@/services/placement.service'
 
-type Ctx = { params: { id: string } }
 
-export const POST = withAuth(
+export const POST = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    const result = await submitTest(ctx.auth!.userId, ctx.params.id!)
+    const result = await submitTest(ctx.auth!.userId, ctx.params.id)
     return ok(result, { traceId: ctx.traceId })
   },
-) as unknown as (request: Request, context: Ctx) => Promise<Response>
+)

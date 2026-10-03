@@ -5,8 +5,11 @@
  */
 import { prisma } from '@/lib/db'
 import { AppError, errNotFound } from '@/lib/api/errors'
-import { localDate } from '@/lib/utils/date'
+import { createLogger } from '@/lib/logger/logger'
+import { userToday } from '@/lib/utils/user-date'
 import { Prisma } from '@prisma/client'
+
+const log = createLogger('placement.service')
 
 export const PLACEMENT_QUESTION_COUNT = 30
 
@@ -33,43 +36,132 @@ export interface PlacementScores {
 // 评分纯函数（可单测）
 // ---------------------------------------------------------------------------
 
+/**
+ * 维度权重（PRD Q9 / §十一）：词汇 30% / 语法 30% / 阅读 25% / 听力 15%。
+ * 评分与抽题配比共用同一份权重常量，保证「怎么算分」与「出几道题」口径一致。
+ */
+export const DIMENSION_WEIGHTS: Readonly<Record<Dimension, number>> = {
+  vocabulary: 0.3,
+  grammar: 0.3,
+  reading: 0.25,
+  listening: 0.15,
+}
+
 /** 维度得分：正确率 0-100；维度 0 题时给 40（保守中位） */
 export function dimensionScore(correct: number, total: number): number {
   if (total <= 0) return 40
   return Math.round((correct / total) * 100)
 }
 
-/** 总分 = 四维加权（词汇 30% / 语法 25% / 阅读 25% / 听力 20%） */
+/** 总分 = 四维加权（词汇 30% / 语法 30% / 阅读 25% / 听力 15%，PRD Q9） */
 export function overallScore(scores: Omit<PlacementScores, 'overall'>): number {
   return Math.round(
-    scores.vocabulary * 0.3 + scores.grammar * 0.25 + scores.reading * 0.25 + scores.listening * 0.2,
+    scores.vocabulary * DIMENSION_WEIGHTS.vocabulary +
+      scores.grammar * DIMENSION_WEIGHTS.grammar +
+      scores.reading * DIMENSION_WEIGHTS.reading +
+      scores.listening * DIMENSION_WEIGHTS.listening,
   )
 }
 
-/** 分数 → CEFR（§5.10 映射） */
-export function scoreToCefr(overall: number): 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2' {
-  if (overall >= 85) return 'C1'
-  if (overall >= 70) return 'B2'
-  if (overall >= 55) return 'B1'
-  if (overall >= 40) return 'A2'
+/** CEFR 档位（与 prisma CEFRLevel 枚举一致） */
+export type CefrLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'
+
+/** 分数 → CEFR（架构 §5.5 mapCefr：88/78/65/50/33 五段 + C2 顶档） */
+export function scoreToCefr(overall: number): CefrLevel {
+  if (overall >= 88) return 'C2'
+  if (overall >= 78) return 'C1'
+  if (overall >= 65) return 'B2'
+  if (overall >= 50) return 'B1'
+  if (overall >= 33) return 'A2'
   return 'A1'
 }
 
-/** CEFR + 分数 → CET 估算分（0-710） */
-export function estimateCet(overall: number, cefr: string): { cet4: number; cet6: number } {
-  const base = 250 + Math.round((overall / 100) * 380) // 250-630 区间
-  const bump = cefr === 'B2' || cefr === 'C1' ? 30 : 0
+/** 文档别名（§5.5 mapCefr） */
+export const mapCefr = scoreToCefr
+
+/** CET 基准分（§5.5 CET_BASE，710 分制） */
+export const CET_BASE: Readonly<Record<CefrLevel, number>> = {
+  A1: 220,
+  A2: 330,
+  B1: 420,
+  B2: 520,
+  C1: 600,
+  C2: 660,
+}
+
+/** 各档位在 0-100 综合分区间内的中心点（§5.5 BAND_CENTER，用于档内线性微调） */
+export const BAND_CENTER: Readonly<Record<CefrLevel, number>> = {
+  A1: 20,
+  A2: 42,
+  B1: 58,
+  B2: 72,
+  C1: 84,
+  C2: 94,
+}
+
+/** CET 估算上下限（§5.5 clamp 区间） */
+export const CET_MIN = 220
+export const CET_MAX = 700
+
+/** 数值夹取 */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+/**
+ * 单科 CET 估算（§5.5 estimateCet）：
+ * base = CET_BASE[level]；adjust = round(0.5 × (overall − BAND_CENTER[level]))；
+ * CET-6 同水平略低（×0.92）；结果 clamp 到 [220, 700]。
+ */
+export function estimateCetFor(overall: number, level: CefrLevel, exam: 'CET4' | 'CET6'): number {
+  const base = CET_BASE[level]
+  const adjust = Math.round(0.5 * (overall - BAND_CENTER[level]))
+  const raw = exam === 'CET4' ? base + adjust : (base + adjust) * 0.92
+  return clamp(Math.round(raw), CET_MIN, CET_MAX)
+}
+
+/** CET-4 / CET-6 双科估算（落库到 placement_tests.cetEstimate） */
+export function estimateCet(overall: number, level: CefrLevel): { cet4: number; cet6: number } {
   return {
-    cet4: Math.min(710, base + 10 + bump),
-    cet6: Math.min(710, Math.max(0, base - 60 + bump)),
+    cet4: estimateCetFor(overall, level, 'CET4'),
+    cet6: estimateCetFor(overall, level, 'CET6'),
   }
+}
+
+/**
+ * 按维度权重把总题量分配到四个维度（最大余额法，整数且总和守恒）。
+ * PRD Q9 固定 30 题 → 词汇 9 / 语法 9 / 阅读 8 / 听力 4。
+ */
+export function allocateQuestionCounts(total: number): Record<Dimension, number> {
+  const dims: Dimension[] = ['vocabulary', 'grammar', 'reading', 'listening']
+  const exact = dims.map((d) => ({ dim: d, value: total * DIMENSION_WEIGHTS[d] }))
+  const counts = Object.fromEntries(dims.map((d) => [d, 0])) as Record<Dimension, number>
+  let assigned = 0
+  for (const item of exact) {
+    const floor = Math.floor(item.value)
+    counts[item.dim] = floor
+    assigned += floor
+  }
+  // 余数按小数部分从大到小补齐
+  const remainders = exact
+    .map((item) => ({ dim: item.dim, frac: item.value - Math.floor(item.value) }))
+    .sort((a, b) => b.frac - a.frac)
+  for (let i = 0; assigned < total && i < remainders.length; i += 1) {
+    const target = remainders[i]!
+    counts[target.dim] += 1
+    assigned += 1
+  }
+  return counts
 }
 
 // ---------------------------------------------------------------------------
 // DB 流程
 // ---------------------------------------------------------------------------
 
-/** 开始测试：按维度配比抽题（词汇 12 / 语法 7 / 阅读 6 / 听力 5），复用进行中的 attempt */
+/**
+ * 开始测试：按维度权重配比抽题（PRD Q9：30 题 → 词汇 9 / 语法 9 / 阅读 8 / 听力 4），
+ * 复用进行中的 attempt；题池不足时显式告警并按实际题量建卷（不静默缩水）。
+ */
 export async function startTest(userId: string): Promise<{ testId: string; questionCount: number }> {
   const existing = await prisma.placementTest.findFirst({
     where: { userId, status: 'IN_PROGRESS' },
@@ -77,14 +169,11 @@ export async function startTest(userId: string): Promise<{ testId: string; quest
   })
   if (existing) return { testId: existing.id, questionCount: PLACEMENT_QUESTION_COUNT }
 
-  const plan: Array<[Dimension, number]> = [
-    ['vocabulary', 12],
-    ['grammar', 7],
-    ['reading', 6],
-    ['listening', 5],
-  ]
+  const plan = allocateQuestionCounts(PLACEMENT_QUESTION_COUNT)
   const pickedIds: string[] = []
-  for (const [dim, count] of plan) {
+  const shortages: string[] = []
+  for (const dim of DIMENSIONS as readonly Dimension[]) {
+    const want = plan[dim]
     const rows = await prisma.question.findMany({
       where: {
         OR: [{ tags: { array_contains: dim } }, { category: dim }],
@@ -93,12 +182,18 @@ export async function startTest(userId: string): Promise<{ testId: string; quest
       },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
-      take: count * 4, // 池子抽样，避免每次同题
+      take: want * 4, // 池子抽样，避免每次同题
     })
-    const shuffled = rows.sort(() => Math.random() - 0.5).slice(0, count)
+    if (rows.length < want) {
+      shortages.push(`${dim}: 需 ${want} 题，题池仅 ${rows.length} 题`)
+    }
+    const shuffled = rows.sort(() => Math.random() - 0.5).slice(0, want)
     pickedIds.push(...shuffled.map((r) => r.id))
   }
   if (pickedIds.length === 0) throw new AppError('RESOURCE_NOT_FOUND', '题库为空，请先执行 seed')
+  if (shortages.length > 0) {
+    log.warn({ msg: 'placement question pool insufficient', userId, picked: pickedIds.length, shortages })
+  }
 
   const test = await prisma.placementTest.create({
     data: { userId, questionCount: pickedIds.length },
@@ -233,8 +328,8 @@ export async function submitTest(userId: string, testId: string): Promise<{ scor
     }),
   ])
 
-  // 当日统计
-  const today = localDate()
+  // 当日统计（按用户时区口径）
+  const today = await userToday(userId)
   await prisma.dailyLearningStat.upsert({
     where: { userId_date: { userId, date: today } },
     update: { examCount: { increment: 1 }, correctCount: { increment: answered.filter((a) => a.isCorrect).length }, wrongCount: { increment: answered.filter((a) => !a.isCorrect).length }, xpEarned: { increment: 50 } },

@@ -4,11 +4,10 @@
 import { withAuth, ok } from '@/lib/api/handler'
 import { getWordDetail } from '@/services/vocabulary.service'
 
-type Ctx = { params: { id: string } }
 
-export const GET = withAuth(
+export const GET = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    const data = await getWordDetail(ctx.auth!.userId, ctx.params.id!)
+    const data = await getWordDetail(ctx.auth!.userId, ctx.params.id)
     return ok(data, { traceId: ctx.traceId })
   },
-) as unknown as (request: Request, context: Ctx) => Promise<Response>
+)

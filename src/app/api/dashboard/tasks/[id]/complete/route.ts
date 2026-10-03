@@ -4,11 +4,10 @@
 import { withAuth, ok } from '@/lib/api/handler'
 import { completeTask } from '@/services/dashboard.service'
 
-type Ctx = { params: { id: string } }
 
-export const POST = withAuth(
+export const POST = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    const result = await completeTask(ctx.auth!.userId, ctx.params.id!)
+    const result = await completeTask(ctx.auth!.userId, ctx.params.id)
     return ok(result, { traceId: ctx.traceId })
   },
-) as unknown as (request: Request, context: Ctx) => Promise<Response>
+)

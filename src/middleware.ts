@@ -38,8 +38,24 @@ const PUBLIC_PATHS = [
 const ADMIN_PREFIXES = ['/admin', '/api/admin']
 
 const encoder = new TextEncoder()
-const secret = (): Uint8Array =>
-  encoder.encode(process.env.AUTH_JWT_SECRET || 'englishai-dev-secret-change-in-production')
+
+/**
+ * JWT 粗筛密钥（QA P2 #15）。
+ * 生产环境缺 `AUTH_JWT_SECRET` 时直接抛错阻断启动，避免回退到弱默认密钥；
+ * 开发/测试环境保留 fallback。与 `src/lib/auth/jwt.ts` 的 resolveSecret 同口径。
+ * 注意：middleware 里不能用 appConfig（会拖入 node-only 依赖），故直接读 env。
+ */
+const secret = (): Uint8Array => {
+  const raw = process.env.AUTH_JWT_SECRET
+  if (raw && raw.length >= 16) return encoder.encode(raw)
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[middleware] AUTH_JWT_SECRET 未配置或长度不足 16 位，生产环境拒绝使用默认弱密钥。' +
+        '请设置 `AUTH_JWT_SECRET=$(openssl rand -base64 48)` 后重启。',
+    )
+  }
+  return encoder.encode('englishai-dev-secret-change-in-production')
+}
 
 /** 剥离 locale 前缀（/en/foo → /foo），供守卫匹配 */
 function stripLocale(pathname: string): string {

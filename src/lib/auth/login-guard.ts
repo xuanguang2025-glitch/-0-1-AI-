@@ -38,22 +38,37 @@ export async function getLockState(userId: string): Promise<LockState> {
   }
 }
 
-/** 登录失败：计数 +1，达到阈值即锁定 */
+/**
+ * 登录失败：计数 +1，达到阈值即锁定。
+ * 单条 SQL 条件更新（QA P2 #14）：读改写合并为一次原子 UPDATE，
+ * 并发失败请求不会各自读到旧计数而多放行 1-2 次尝试。
+ */
 export async function recordFailure(userId: string): Promise<LockState> {
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: { failedLoginCount: { increment: 1 } },
-    select: { failedLoginCount: true },
-  })
-  if (user.failedLoginCount >= MAX_FAILED_ATTEMPTS) {
-    const lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60_000)
-    await prisma.user.update({ where: { id: userId }, data: { lockedUntil } })
+  const lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60_000)
+  // CASE 表达式读的是「更新前」的行值，故用 +1 与阈值比较
+  const rows = await prisma.$queryRaw<Array<{ failedLoginCount: number }>>`
+    UPDATE "users"
+    SET "failedLoginCount" = "failedLoginCount" + 1,
+        "lockedUntil" = CASE
+          WHEN "failedLoginCount" + 1 >= ${MAX_FAILED_ATTEMPTS} THEN ${lockedUntil}
+          ELSE "lockedUntil"
+        END
+    WHERE "id" = ${userId} AND "deletedAt" IS NULL
+    RETURNING "failedLoginCount"
+  `
+
+  const current = rows[0]?.failedLoginCount
+  if (current === undefined) {
+    // 用户不存在/已软删：按未锁定处理，调用方随后会因账号无效而失败
+    return { locked: false, remainingMs: 0, remainingAttempts: MAX_FAILED_ATTEMPTS }
+  }
+  if (current >= MAX_FAILED_ATTEMPTS) {
     return { locked: true, remainingMs: LOCK_MINUTES * 60_000, remainingAttempts: 0 }
   }
   return {
     locked: false,
     remainingMs: 0,
-    remainingAttempts: Math.max(0, MAX_FAILED_ATTEMPTS - user.failedLoginCount),
+    remainingAttempts: Math.max(0, MAX_FAILED_ATTEMPTS - current),
   }
 }
 

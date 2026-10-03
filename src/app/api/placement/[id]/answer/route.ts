@@ -11,12 +11,12 @@ const answerSchema = z.object({
   responseMs: z.number().int().min(0).max(600_000),
 })
 
-type Ctx = { params: { id: string } }
+type AnswerBody = z.infer<typeof answerSchema>
 
-export const POST = withAuth(
+export const POST = withAuth<unknown, AnswerBody, { id: string }>(
   async (ctx) => {
-    await saveAnswer(ctx.auth!.userId, ctx.params.id!, ctx.data.questionId, ctx.data.userAnswer, ctx.data.responseMs)
+    await saveAnswer(ctx.auth!.userId, ctx.params.id, ctx.data.questionId, ctx.data.userAnswer, ctx.data.responseMs)
     return ok(null, { traceId: ctx.traceId })
   },
   { bodySchema: answerSchema },
-) as unknown as (request: Request, context: Ctx) => Promise<Response>
+)

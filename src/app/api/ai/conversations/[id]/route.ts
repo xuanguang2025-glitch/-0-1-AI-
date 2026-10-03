@@ -14,16 +14,16 @@ async function loadOwned(id: string, userId: string) {
   return conv
 }
 
-export const GET = withAuth<{ id: string }, unknown>(
+export const GET = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    const conv = await loadOwned(ctx.params.id!, ctx.auth!.userId)
+    const conv = await loadOwned(ctx.params.id, ctx.auth!.userId)
     return ok(conv, { traceId: ctx.traceId })
   },
 )
 
-export const DELETE = withAuth<{ id: string }, unknown>(
+export const DELETE = withAuth<unknown, unknown, { id: string }>(
   async (ctx) => {
-    const conv = await loadOwned(ctx.params.id!, ctx.auth!.userId)
+    const conv = await loadOwned(ctx.params.id, ctx.auth!.userId)
     await prisma.aiConversation.update({ where: { id: conv.id }, data: { deletedAt: new Date() } })
     return ok(null, { traceId: ctx.traceId })
   },

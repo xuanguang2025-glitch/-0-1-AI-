@@ -3,7 +3,7 @@
  */
 import { withAuth, ok } from '@/lib/api/handler'
 import { prisma } from '@/lib/db'
-import { localDate } from '@/lib/utils/date'
+import { userToday } from '@/lib/utils/user-date'
 import { aiService } from '@/services/ai/ai.service'
 import { calcStreakDays } from '@/services/gamification/streak'
 import type { AiRunContext } from '@/services/ai/types'
@@ -11,7 +11,7 @@ import type { AiRunContext } from '@/services/ai/types'
 export const GET = withAuth(
   async (ctx) => {
     const userId = ctx.auth!.userId
-    const today = localDate()
+    const today = await userToday(userId)
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10)
 
     // 最近 30 天学习统计 + 用户 XP/最长连胜（与 Dashboard 主聚合口径一致）

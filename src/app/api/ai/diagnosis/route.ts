@@ -3,6 +3,7 @@
  */
 import { z } from 'zod'
 import { withAuth, ok } from '@/lib/api/handler'
+import { aiRateLimitRule } from '@/lib/auth/route-guards'
 import { aiService } from '@/services/ai/ai.service'
 import type { AiRunContext } from '@/services/ai/types'
 
@@ -39,5 +40,5 @@ export const POST = withAuth(
       },
     })
   },
-  { bodySchema: diagnosisSchema },
+  { bodySchema: diagnosisSchema, rateLimit: aiRateLimitRule('diagnosis') },
 )

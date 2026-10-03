@@ -2,7 +2,7 @@
  * 学习分析服务（架构 §8.1 T08）：指标卡 / 30 天趋势 / 日历热力。
  */
 import { prisma } from '@/lib/db'
-import { localDate } from '@/lib/utils/date'
+import { userToday } from '@/lib/utils/user-date'
 
 export interface TrendPoint {
   date: string
@@ -14,7 +14,7 @@ export interface TrendPoint {
 
 /** 近 N 天趋势（补零对齐日期轴） */
 export async function getTrend(userId: string, days = 30): Promise<TrendPoint[]> {
-  const today = localDate()
+  const today = await userToday(userId)
   const start = dateOffset(today, -(days - 1))
   const rows = await prisma.dailyLearningStat.findMany({
     where: { userId, date: { gte: start } },
@@ -41,7 +41,7 @@ export async function getTrend(userId: string, days = 30): Promise<TrendPoint[]>
 
 /** 指标卡（今日 + 累计） */
 export async function getOverview(userId: string) {
-  const today = localDate()
+  const today = await userToday(userId)
   const [todayStat, agg, userStats] = await Promise.all([
     prisma.dailyLearningStat.findUnique({ where: { userId_date: { userId, date: today } } }),
     prisma.dailyLearningStat.aggregate({
@@ -70,7 +70,7 @@ export async function getOverview(userId: string) {
 
 /** 热力日历数据（按周组织由前端完成；此处给日期连续数组） */
 export async function getCalendar(userId: string, days = 140): Promise<Array<{ date: string; minutes: number }>> {
-  const today = localDate()
+  const today = await userToday(userId)
   const start = dateOffset(today, -(days - 1))
   const rows = await prisma.dailyLearningStat.findMany({
     where: { userId, date: { gte: start } },

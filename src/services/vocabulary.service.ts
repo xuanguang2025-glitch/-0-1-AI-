@@ -5,14 +5,27 @@
 import { prisma } from '@/lib/db'
 import { AppError, errNotFound } from '@/lib/api/errors'
 import { review, stateFromRow, type SelfRating } from './vocabulary/srs/srs.engine'
-import { xpForEvent } from './gamification/level'
-import { localDate } from '@/lib/utils/date'
+import { reviewXpAward, xpForEvent } from './gamification/level'
+import { userToday } from '@/lib/utils/user-date'
 import { createLogger } from '@/lib/logger/logger'
 
 const log = createLogger('vocabulary.service')
 
 const TODAY_LIMIT = 30
 const QUEUE_LIMIT = 50
+
+/**
+ * 复习 XP 发放（架构 §5.4「复习正确 1 次 +1，上限 100/日，防刷」）。
+ * 统计当日已答对的复习流水条数，超过上限后不再发放，避免脚本刷分。
+ */
+async function resolveReviewXp(userId: string, isCorrect: boolean): Promise<number> {
+  if (!isCorrect) return 0
+  const startOfToday = new Date(`${await userToday(userId)}T00:00:00.000Z`)
+  const correctReviewsToday = await prisma.vocabularyReview.count({
+    where: { userId, isCorrect: true, occurredAt: { gte: startOfToday } },
+  })
+  return reviewXpAward(correctReviewsToday, true)
+}
 
 // ---------------------------------------------------------------------------
 // 查询类
@@ -182,7 +195,7 @@ export async function learnWord(userId: string, vocabularyId: string): Promise<{
     data: { userId, vocabularyId, learnedAt: new Date(), nextReviewAt: new Date() },
   })
 
-  const today = localDate()
+  const today = await userToday(userId)
   const xp = xpForEvent('learn_word')
   await prisma.$transaction([
     prisma.userStats.updateMany({ where: { userId }, data: { xp: { increment: xp }, wordsLearned: { increment: 1 } } }),
@@ -239,8 +252,9 @@ export async function submitReview(
 
   const state = stateFromRow(row)
   const outcome = review(state, input.rating, input.responseMs)
-  const today = localDate()
-  const xp = xpForEvent('review_word')
+  const today = await userToday(userId)
+  const reviewXp = await resolveReviewXp(userId, outcome.isCorrect)
+  const xp = reviewXp
 
   // 乐观锁事务：version 不匹配时重读一次重算
   const apply = async (): Promise<void> => {
