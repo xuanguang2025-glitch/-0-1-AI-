@@ -27,8 +27,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # 覆盖率门禁：阈值定义在 vitest.config.ts 的 test.coverage.thresholds
+      # （注意必须挂在 test 下——放顶层会被静默忽略，导致门禁假绿）。
+      # 走 npm script 而非直接 npx vitest，保证本地与 CI 参数永不漂移。
       - name: Unit tests (coverage gate ≥80%)
-        run: npx vitest run --coverage
+        run: npm run test:coverage
 
       # CI 不依赖数据库：构建只校验类型与产物（build 前 prisma generate）
       - name: Build
