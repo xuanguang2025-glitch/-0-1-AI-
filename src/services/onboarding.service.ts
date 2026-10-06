@@ -6,7 +6,8 @@ import { prisma } from '@/lib/db'
 import { errNotFound } from '@/lib/api/errors'
 import { createLogger } from '@/lib/logger/logger'
 import { userToday } from '@/lib/utils/user-date'
-import { Prisma } from '@prisma/client'
+import { generateDailyTasks, normalizeAbility, TASK_PAYLOAD, type PlanInput } from '@/services/plan/generator'
+import { Prisma, TaskSource } from '@prisma/client'
 
 const log = createLogger('onboarding.service')
 
@@ -92,9 +93,14 @@ export async function submit(userId: string, steps: OnboardingSteps, skipped: bo
     planId = goal.id
   }
 
-  // 首周任务（未跳过时）：按每日时长生成 7 天 × 3 类任务，已有任务的日期跳过（幂等）
+  // 首周任务（未跳过时）：Phase 2 起改由权重式生成器产出（§5.2.2）；
+  // 此阶段尚无 Placement 能力数据 → 传入中性能力向量（normalizeAbility 兜底 50）。
   if (!skipped) {
-    await generateFirstWeekTasks(userId, steps.dailyTime)
+    await generateFirstWeekTasks(userId, {
+      dailyMinutes: steps.dailyTime,
+      weeklyDays: steps.weeklyDays,
+      examType: steps.targetExam,
+    })
   }
 
   log.info({ msg: 'onboarding submitted', userId, skipped })
@@ -105,58 +111,59 @@ export async function submit(userId: string, steps: OnboardingSteps, skipped: bo
 }
 
 /**
- * 生成首周任务：VOCAB（新词）+ REVIEW（复习）+ READING（阅读），共 7 天。
- * 整段包在 $transaction 内（读「已覆盖日期」+ 批量写必须原子），
- * 否则并发提交 onboarding 会重复建任务（QA P2 #10）。
+ * 生成首周任务（7 天，权重式生成器 §5.2.2，ONBOARDING 触发）。
+ *
+ * 幂等 & 并发安全（修 QA P2 #10）：
+ *   1) `StudyTask` 已有 `@@unique([userId, date, taskType])`；
+ *   2) 整段包在 `$transaction` 内，用 `createMany({ skipDuplicates: true })` 批量写入，
+ *      并发双提交时由唯一约束去重——不再依赖「先查后建」（原实现有 TOCTOU 竞态）。
  */
-async function generateFirstWeekTasks(userId: string, dailyMinutes: number): Promise<void> {
+async function generateFirstWeekTasks(
+  userId: string,
+  opts: { dailyMinutes: number; weeklyDays: number; examType: string | null },
+): Promise<void> {
   const today = await userToday(userId)
-  const vocabCount = Math.max(5, Math.round(dailyMinutes * 0.4))
-  const reviewCount = Math.max(10, Math.round(dailyMinutes * 0.3))
-  const readingMin = Math.max(5, dailyMinutes - Math.round(dailyMinutes * 0.7))
+  const plan = await prisma.studyPlan.findFirst({
+    where: { userId, status: 'ACTIVE' },
+    orderBy: { version: 'desc' },
+    select: { id: true },
+  })
+
+  // Onboarding 阶段尚无 Placement 能力数据 → 中性能力向量（normalizeAbility 兜底 50）
+  const input: PlanInput = {
+    dailyMinutes: opts.dailyMinutes,
+    weeklyDays: opts.weeklyDays,
+    ability: normalizeAbility(null),
+    goal: { examType: opts.examType ?? 'DAILY' },
+    history: { avgCompletionRate: 1, last7Completion: [] },
+    dueReviewCount: 0,
+  }
+  const tasks = generateDailyTasks(input)
+
+  const rows: Prisma.StudyTaskCreateManyInput[] = []
+  for (let i = 0; i < 7; i++) {
+    const date = dateOffset(today, i)
+    for (const task of tasks) {
+      rows.push({
+        userId,
+        date,
+        taskType: task.type,
+        title: task.title,
+        targetValue: task.target,
+        unit: task.unit,
+        sortOrder: task.sortOrder,
+        source: TaskSource.ONBOARDING,
+        weightSnapshot: task.weightSnapshot as unknown as Prisma.InputJsonValue,
+        weakHits: (task.weakHits ?? undefined) as unknown as Prisma.InputJsonValue | undefined,
+        payload: TASK_PAYLOAD[task.type] as unknown as Prisma.InputJsonValue,
+        planId: plan?.id ?? null,
+      })
+    }
+  }
+  if (rows.length === 0) return
 
   const created = await prisma.$transaction(async (tx) => {
-    const existing = await tx.studyTask.findMany({
-      where: { userId, date: { gte: today, lte: dateOffset(today, 6) } },
-      select: { date: true },
-    })
-    const covered = new Set(existing.map((t) => t.date))
-    const rows: Array<{
-      userId: string
-      date: string
-      taskType: 'VOCAB' | 'REVIEW' | 'READING'
-      title: string
-      targetValue: number
-      unit: string
-      sortOrder: number
-      payload: Prisma.InputJsonValue
-    }> = []
-    for (let i = 0; i < 7; i++) {
-      const date = dateOffset(today, i)
-      if (covered.has(date)) continue
-      rows.push(
-        {
-          userId, date, taskType: 'VOCAB',
-          title: `学习新词 ${vocabCount} 个`,
-          targetValue: vocabCount, unit: 'word', sortOrder: 0,
-          payload: { type: 'vocabulary_learn' } as Prisma.InputJsonValue,
-        },
-        {
-          userId, date, taskType: 'REVIEW',
-          title: '完成到期复习',
-          targetValue: reviewCount, unit: 'word', sortOrder: 1,
-          payload: { type: 'vocabulary_review' } as Prisma.InputJsonValue,
-        },
-        {
-          userId, date, taskType: 'READING',
-          title: `阅读练习 ${readingMin} 分钟`,
-          targetValue: readingMin, unit: 'minute', sortOrder: 2,
-          payload: { type: 'reading' } as Prisma.InputJsonValue,
-        },
-      )
-    }
-    if (rows.length === 0) return 0
-    const result = await tx.studyTask.createMany({ data: rows })
+    const result = await tx.studyTask.createMany({ data: rows, skipDuplicates: true })
     return result.count
   })
 

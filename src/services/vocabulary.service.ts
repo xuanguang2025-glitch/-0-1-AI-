@@ -4,7 +4,7 @@
  */
 import { prisma } from '@/lib/db'
 import { AppError, errNotFound } from '@/lib/api/errors'
-import { review, stateFromRow, type SelfRating } from './vocabulary/srs/srs.engine'
+import { review, stateFromRow, ADVANCE_INTERVALS, type SelfRating } from './vocabulary/srs/srs.engine'
 import { reviewXpAward, xpForEvent } from './gamification/level'
 import { userToday } from '@/lib/utils/user-date'
 import { createLogger } from '@/lib/logger/logger'
@@ -350,9 +350,9 @@ export async function submitReview(
   }
 }
 
-/** 前端展示的 1/3/7/14/30 天预测（按当前 EF 缩放） */
+/** 前端展示的间隔预测（按当前 EF 缩放；与 8 档长尾阶梯 ADVANCE_INTERVALS 同源） */
 function predictIntervals(easeFactor: number, currentInterval: number, reps = 1): number[] {
-  const table = [1, 3, 7, 14, 30]
+  const table = [...ADVANCE_INTERVALS]
   const scale = 0.5 + (easeFactor / 2.5) * 0.5
   return table.map((base, i) => {
     if (base <= currentInterval && i <= reps) return currentInterval

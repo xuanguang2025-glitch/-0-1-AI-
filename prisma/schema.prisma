@@ -173,6 +173,15 @@ enum ReviewSource {
   CHALLENGE
 }
 
+/// 任务生成来源（与架构 §5.2.2 三触发时机一致）
+enum TaskSource {
+  ONBOARDING
+  PLACEMENT_COMPLETED
+  DAILY_CRON
+  PLAN_ADJUST
+  MANUAL
+}
+
 enum AiCapability {
   WORD_EXPLAIN // A1
   WRITING_REVIEW // A2
@@ -908,6 +917,12 @@ model StudyTask {
   /// 深链，点击直达对应学习页：{type:'vocabulary_learn'} / {type:'listening', id:'xxx'}
   payload        Json?
   sortOrder      Int        @default(0)
+  /// 生成本任务的触发来源（架构 §5.2.2）：ONBOARDING | PLACEMENT_COMPLETED | DAILY_CRON | PLAN_ADJUST | MANUAL
+  source         TaskSource @default(DAILY_CRON)
+  /// 生成时各模块权重快照 {VOCAB:0.32, LISTENING:0.28, ...}，供归因分析（M2）
+  weightSnapshot Json?
+  /// 弱项优先命中项 {LISTENING: 30}（能力分越低越优先）
+  weakHits       Json?
   completedAt    DateTime?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
@@ -916,7 +931,8 @@ model StudyTask {
   user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, date, status])
-  @@index([userId, date, taskType])
+  /// 幂等键：同一 (userId, date, taskType) 唯一，重跑不产生重复行（架构 §5.2.2 验收 4）
+  @@unique([userId, date, taskType])
   @@index([planId, date])
   @@map("study_tasks")
 }

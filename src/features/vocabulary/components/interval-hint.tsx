@@ -1,11 +1,12 @@
 'use client'
 
 /**
- * IntervalHint：复习提交后展示的间隔预测（1/3/7/14/30 天按 EF 缩放）。
+ * IntervalHint：复习提交后展示的间隔预测（与 8 档长尾阶梯 ADVANCE_INTERVALS 同源，按 EF 缩放）。
  */
+import { ADVANCE_INTERVALS } from '@/services/vocabulary/srs/srs.constants'
 import type { ReviewResult } from '../types'
 
-const LABELS = ['1天', '3天', '7天', '14天', '30天']
+const LABELS = ADVANCE_INTERVALS.map((days) => `${days}天`)
 
 export function IntervalHint({ result }: { result: ReviewResult | null }): React.JSX.Element | null {
   if (!result) return null

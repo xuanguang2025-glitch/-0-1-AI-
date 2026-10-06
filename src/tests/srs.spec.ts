@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { ADVANCE_INTERVALS, EASE_MAX, EASE_MIN, STAGE_THRESHOLDS } from '@/services/vocabulary/srs/srs.constants'
+import { ADVANCE_INTERVALS, EASE_MAX, EASE_MIN, GRADUATED_INTERVALS, MIN_GRADUATE_REPS, STAGE_THRESHOLDS } from '@/services/vocabulary/srs/srs.constants'
 import { advance, clamp, nextReviewFrom, stageFromMastery } from '@/services/vocabulary/srs/srs.formula'
 import { review, stateFromRow } from '@/services/vocabulary/srs/srs.engine'
 import type { SrsState } from '@/services/vocabulary/srs/srs.types'
@@ -97,25 +97,67 @@ describe('ADVANCE 路径（答对且未毕业）', () => {
     expect(out.intervalDays).toBe(2)
   })
 
-  it('reps 超表长后取末位间隔', () => {
-    const s = freshState({ reps: 9, consecutiveCorrect: 9, masteryScore: 80 })
-    const out = advance(s, 4, 5000, NOW)
+  it('reps 超表长后取末位间隔（长尾 240 天）', () => {
+    // mastery 保持在 90 以下、rating=4（EF 不变量）→ 走 ADVANCE 路径、缩放系数 1.0
+    const s = freshState({ reps: 9, consecutiveCorrect: 9, masteryScore: 50, easeFactor: 2.5 })
+    const out = advance(s, 4, 8000, NOW)
+    expect(out.path).toBe('ADVANCE')
     expect(out.reps).toBe(10)
-    const base = ADVANCE_INTERVALS[ADVANCE_INTERVALS.length - 1] ?? 30
+    const base = ADVANCE_INTERVALS[ADVANCE_INTERVALS.length - 1] ?? 240
+    expect(base).toBe(240)
+    // EF=2.5 → 缩放系数 1.0 → 恰为末位间隔 240
+    expect(out.intervalDays).toBe(240)
     expect(out.intervalDays).toBeGreaterThanOrEqual(Math.round(base * 0.5))
   })
 })
 
+describe('长尾阶梯（架构 §5.1.4 裁决 B-1，P0）：8 档 [1,3,7,14,30,60,120,240]', () => {
+  it('ADVANCE_INTERVALS 长度为 8 且末位为 240', () => {
+    expect(ADVANCE_INTERVALS.length).toBe(8)
+    expect(ADVANCE_INTERVALS[ADVANCE_INTERVALS.length - 1]).toBe(240)
+  })
+
+  it('EF=2.5 连续答对 reps=1..8：间隔序列恰为 [1,3,7,14,30,60,120,240]', () => {
+    // rating=4 时 EF 增量为 0（不变量），缩放系数恒为 1.0，可直接验证间隔表；
+    // 每轮复位 mastery/连续计数以隔离「毕业分支」，只让 reps 递增驱动查表下标。
+    let s = freshState({ masteryScore: 10 })
+    const intervals: number[] = []
+    for (let i = 0; i < 8; i++) {
+      const out = advance(s, 4, 8000, NOW)
+      expect(out.path).toBe('ADVANCE')
+      expect(out.easeFactor).toBeCloseTo(2.5, 5)
+      intervals.push(out.intervalDays)
+      s = { ...out, masteryScore: 10, consecutiveCorrect: 0 }
+    }
+    expect(intervals).toEqual([1, 3, 7, 14, 30, 60, 120, 240])
+  })
+})
+
 describe('MASTERED 路径（mastery≥90 且连续答对 3 次）', () => {
-  it('毕业：间隔 45 天、stage=MASTERED', () => {
+  it('毕业：首档间隔 60 天（替代 Phase 1 的 45 天单跳）、stage=MASTERED', () => {
     const s = freshState({ masteryScore: 85, consecutiveCorrect: 2, reps: 4 })
     const out = advance(s, 5, 2000, NOW)
     expect(out.path).toBe('MASTERED')
     expect(out.stage).toBe('MASTERED')
-    expect(out.intervalDays).toBe(45)
+    expect(out.intervalDays).toBe(60)
     expect(out.consecutiveCorrect).toBe(3)
     expect(out.masteryScore).toBe(100)
-    expect(out.nextReviewAt.getTime()).toBe(nextReviewFrom(NOW, 45).getTime())
+    expect(out.nextReviewAt.getTime()).toBe(nextReviewFrom(NOW, 60).getTime())
+  })
+
+  it('毕业递进：连续答对后间隔为 60 → 120 → 240（三级递进，§5.1.4 裁决 B-2）', () => {
+    expect(GRADUATED_INTERVALS).toEqual([60, 120, 240])
+    expect(MIN_GRADUATE_REPS).toBe(5)
+    // 起始 reps=4 → 首次推进后 reps=5 → 递进下标 0（60）
+    let s = freshState({ masteryScore: 95, consecutiveCorrect: 3, reps: 4 })
+    const ups: number[] = []
+    for (let i = 0; i < 3; i++) {
+      const out = advance(s, 4, 8000, NOW)
+      expect(out.path).toBe('MASTERED')
+      ups.push(out.intervalDays)
+      s = { ...out } // mastery 恒为 100、consecutiveCorrect 递增、reps 递增
+    }
+    expect(ups).toEqual([60, 120, 240])
   })
 
   it('mastery 达标但连续不足 3 次 → 不毕业（ADVANCE）', () => {
