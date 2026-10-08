@@ -266,3 +266,131 @@ P1 全部修复且经独立数值交叉验证，非"仅测试通过"。另发现
 | 回归 | **无** | tsc/lint/105 用例全绿；P1 修复未破坏既有行为 |
 
 **最终结论：YES**（R-1 属工程门禁改进项，不阻塞 Phase 1 业务交付；建议下一批次修门禁并在 3000 空闲窗口补跑 E2E 关闭最后条件）
+
+---
+---
+
+# 第四轮 · Phase 2 批次 A 验证（commit `f38a682`）
+
+- **验证人**: 严过关（Edward）· QA Engineer（仍未参与编码、未改动任何 `src/` 业务代码）
+- **对象**: `f38a682`（18 文件 +1126/-80，未 push）：T11 SRS 长尾回改 + T12 权重式任务生成
+- **环境前提**: 本地内嵌 PG 因宿主管理员权限不可用（非项目缺陷）→ 连库项标注 `[BLOCKED-ENV]`
+- **纪律**: 未跑 `next build`、未占 3000、未 commit/push
+
+## 结论：**CONDITIONAL PASS** —— 纯函数层质量高，但有 1 项 P1 功能未闭环 + 2 项测试效力问题必须记录
+
+---
+
+## 一、回归基线（实测）
+
+| 项目 | 声称 | 实测 | 判定 |
+| --- | --- | --- | --- |
+| `npx vitest run` | 126/126 | **126 passed (10 files)** | ✅ 复现 |
+| `npx tsc --noEmit` | 0 错 | exit 0 | ✅ 复现 |
+| `npm run lint` | 0 错 | `✔ No ESLint warnings or errors` | ✅ 复现 |
+| 覆盖率 核心面 | lines 97.95% / branches 91.05% | **97.95 / 91.05 / 96.77 / 97.95**（无 threshold ERROR） | ✅ 复现 |
+| SRS 模块 lines | 100% | srs.constants / srs.engine / srs.formula **均 100% lines** | ✅ 复现 |
+
+> 附注：上一轮 R-1（覆盖率门禁静默失效）已在 `127492f` 修复——`coverage` 从根级移入 `test.coverage` 后门禁真正生效（本轮阈值判定会报错并影响 exit code）。
+
+## 二、T11 SRS 长尾回改
+
+### 1. `estimateReviewLoad(5000)` 独立复算 —— [PASS]
+- **不依赖被测代码手算**：`5000 / 120 = 41.6667` 词/天 → `41.6667 × 8s = 333.33` → `Math.round = 333` 秒/天，`333 ≤ 400` 验收线 ✅
+- 实现 `srs.engine.ts:78-98` 与我手算逐字一致（`dailyReviews=41.67 / etaSeconds=333 / etaMinutes=5.6`）
+- 对照口径自洽：`5000/30×8 = 1333`（Phase 1 封顶）✓、`20000/120×8 = 1333` ✓
+- **口径脆弱性提示（P3，非缺陷）**：333 全部依赖 `STEADY_STATE_AVG_INTERVAL_DAYS=120` 这一**建模常量**而非实测值（`srs.constants.ts:66`）。该值偏保守——稳态下多数词会沉淀在 240 档，真实日均更接近 `5000/240×8 ≈ 167s`。结论方向不变，但「≤400」应理解为「在文档假设均值 120 天下的结论」。
+
+### 2. `reps=1..8` 间隔序列 —— [FAIL]（测试声称与实际不符）
+- 测试 `srs.spec.ts:120-132` 断言 `[1,3,7,14,30,60,120,240]`，但其构造方式为**每轮复位** `masteryScore:10, consecutiveCorrect:0`（测试第 123、130 行），即**人为关闭毕业分支**来隔离 ADVANCE 查表。
+- **我独立驱动被测函数、不复位状态**（临时脚本，测毕已删）得到真实「连续答对」序列：
+  | 场景 | 实际序列 |
+  | --- | --- |
+  | rating=4 **常态** 8s | `1,3,7,14,30,60,`**`240`**`,240…`（**120 档被跳过**，r7 触发 MASTERED） |
+  | rating=4 **慢速** 15s | `1,3,7,14,30,60,120,240,240…`（唯一能走满 8 档的真实路径） |
+  | rating=5 快速 2s | `1,3,7,`**`15`**`,60,120,240…`（EF 升至 2.8，缩放 1.06） |
+- 结论：测试标题「EF=2.5 **连续答对**」名不副实——它验证的是**查表下标**，不是连续答对路径。真实主流场景下 **120 档永不到达**。测试通过 ≠ 产品行为符合「8 档阶梯」的直觉预期。→ 列为问题 **R2-2**。
+
+### 3. 毕业递进 `60→120→240` 是否绕过 —— [PASS]
+- `srs.spec.ts:148-160` 起始 `reps=4, mastery=95, cc=3`，**状态逐轮向前携带**（`s = { ...out }`），每轮断言 `path === 'MASTERED'`，得到 `[60,120,240]`。
+- 对应实现 `srs.formula.ts:76-94`：`gradIndex = clamp(reps-5, 0, 2)` → 60/120/240。**是真实驱动毕业分支，非绕过** ✅
+- 补充：毕业间隔**不做 EF 缩放**（直接用 `GRADUATED_INTERVALS`），与 ADVANCE 路径口径不同，属设计选择，已记录。
+
+### 4. 无数据回填/迁移触碰历史 `vocabulary_reviews` —— [PASS]
+- `prisma/migrations/` 仅 `20260927045208_init`，`vocabulary_reviews` 只在该初始化迁移中出现（建表+索引+外键），**无任何 UPDATE/回填语句**；
+- `f38a682` **未新增迁移文件**（`git show --stat` 无 `migrations/`）；
+- `scripts/rebuild-stats.ts:59` 仅 `vocabularyReview.findMany`（只读），写入目标只有 `daily_learning_stats`；且该脚本**未被本 commit 改动**。
+- 结论：历史复习记录零触碰 ✅
+
+### 5. SRS 三文件覆盖率 —— [PASS]
+- 实测 `srs.constants.ts / srs.engine.ts / srs.formula.ts` **lines 100%**（见上表）。
+
+## 三、T12 权重式任务生成
+
+### 6. 四分支断言的「具体性」—— [PASS]（附口径说明）
+- ③ CET（`plan-generator.spec.ts:68-79`）断言**具体数值**：`SPEAKING ≤ 0.05`、`READING+LISTENING ≥ 0.45`、`SPEAKING 任务被过滤` ✅
+- ④ 完成率（`:82-89`）断言**具体整数**：`baseMinutes = 24 / 30 / 48`（含 0.5 边界不降档）✅
+- ① 弱项（`:45-53`）：`weakHits.LISTENING === 30` 为精确值，权重侧用「大于基线」的相对断言；
+- ② 强项（`:56-65`）：用「低于中性场景」的相对断言。
+- 结论：无任何分支是「仅不抛错」；① ② 为相对断言但配合精确 `weakHits`，可接受。
+
+### 7. ★「弱项 ≥2× 强项」断言 —— [FAIL]（边界拟合，验收规格需重述）
+- **暴力扫描 6⁵=7776 个画像**（独立脚本驱动 `generateDailyTasks`）：
+  - 听力目标 **max = 10**（画像 `v0/lst0/r100/w100/s100`），**min = 5**（`v0/lst100/r0/w0/s0`）→ **比值上限恰为 2.000**
+  - 目标分布：`{5:625, 6:2377, 7:1330, 9:3339, 10:105}` —— 2× 只在极少数极端画像对之间成立
+  - **单变量对照**（仅翻转 listening，其余固定 50）：`lst0=9 vs lst100=5 = 1.800×`
+  - **权重比上界**（`computePlanWeights().weights.LISTENING`）：`max 0.3438 / min 0.1802 = 1.908×`
+- 测试 `:92-106` 用**两个不同画像**（weak: lst30/其余90 → 10；strong: lst90/其余60 → 5）凑到 `10 vs 5 = 2.0`。
+- **判定**：该断言的阈值**恰好等于数学上界（零裕量）**，其成立依赖 `Math.max(…,5)` 下限 + `clampInt` 取整，而非「弱项被设计成 2 倍权重」（底层权重比仅 ~1.9×）。任何对 `BASE_WEIGHT / WEAK_BONUS / 取整 / 下限` 的微调都会击穿它。**它验证的是「数字恰好落在 10 和 5」，不是「弱项需求被加权到 2×」**。
+- **与工程师自述不符**：工程师称「受控条件下数学上限 ~1.56×」，我实测为 **1.800×（单变量）/ 1.908×（权重比）/ 2.000×（跨画像上界）**，未复现 1.56×。请工程师补充其 1.56× 的对照定义。
+- **建议**：改为单调/相对性质断言（如「弱项画像的听力目标严格大于强项画像」或「≥1.5×」），并把产品意图（弱项应获得多大加权）交由架构师在 §5.2.2 明确。→ 问题 **R2-3**（路由 Architect 裁决 + Engineer 调整断言）
+
+### 8. mock-prisma 能否证明真实并发安全 —— [效力边界，必须记录] → 问题 **R2-4**
+- `plan-rebuild.spec.ts:22-42` 用 `vi.mock('@/lib/db')`：`$transaction` 被替换为**直通回调**，`upsert` 被替换为**只记录参数、永不判定唯一性的 spy**。
+- 因此该测试能证明的只有**编排逻辑**：① 键选择为 `(userId,date,taskType)`；② COMPLETED 被 `continue` 跳过；③ 触发窗口（7 天 / 次日）正确。✅ 这三点确实覆盖了。
+- 但**无法证明并发安全**：mock 中不存在「两个并发事务争抢同一唯一键」的语义，唯一约束与 `skipDuplicates` 行为全部落空。真实并发安全的承重结构是 **DB 层 `@@unique` + `createMany({skipDuplicates})` / `upsert`**，只能靠真库验证。
+- 同类问题见 `onboarding.service.ts:171-177`：`createMany({ skipDuplicates: true })` 的并发语义同样只有真库能证。
+- **结论**：T12 幂等/QA#10 竞态修复**当前仅有编排层证据**，真实并发安全 **`[BLOCKED-ENV]`，须待 PG 恢复后补验**（见文末清单）。
+
+### 9. Placement 交卷 → rebuild「只重算未完成」—— [FAIL]（功能未闭环）
+- 单测 `plan-rebuild.spec.ts:57-68` 对「跳过 COMPLETED」的编排断言**真实覆盖**（`skippedCompleted === 1` 且该 key 不出现在任何 upsert）✅
+- **但触发链路是断的**：全仓库检索确认——**没有任何调用方**访问 `/api/study-plan/rebuild`：
+  - 前端 `src/features/placement/api.ts:58-59` 的 `submit()` **只调** `/api/placement/${id}/submit`，无 rebuild 调用；
+  - 服务端 `src/services/placement.service.ts` **不含** `rebuild` / `PLACEMENT_COMPLETED` 引用。
+- 即：commit message 所述「Placement 交卷后由前端调用」**未实现**。真实用户交卷后计划不会重算，「M1 测评→计划重算」闭环缺失。→ 问题 **R2-1（P1）**，路由 **Engineer**。
+
+## 四、顺带核查
+
+### 10. `predictIntervals` 与 `interval-hint.tsx` 改 8 档同源 —— [PASS]（附 1 处 P3 观感）
+- `vocabulary.service.ts:353-361` `predictIntervals` 用 `[...ADVANCE_INTERVALS]`（8 项）→ 返回 8 项；`interval-hint.tsx:10` `LABELS = ADVANCE_INTERVALS.map(...)`（8 项）→ **索引对齐，无错位** ✅
+- P3（旧有观感问题，非本次引入）：当 `currentInterval` 较大时，`predictIntervals` 会把多档都返回同一 `currentInterval`（如全 240），UI 将显示「若1天档：约240天」×8 —— 语义上「不早于当前间隔」，但文案易误读。建议后续把文案改为「最早约 X 天」。
+
+### 11. `sync-enums.ts` 移除 eslint-disable —— [PASS]
+- 生成物 `src/types/enums.ts` 与 schema **逐值一致**：`TaskSource` 5 值 `ONBOARDING/PLACEMENT_COMPLETED/DAILY_CRON/PLAN_ADJUST/MANUAL`（`schema.prisma:177-183` ↔ `enums.ts:320-335`）✅
+- 移除 `/* eslint-disable */` 后 `npm run lint` 仍 **0 错** → 生成物本身 lint-clean，无副作用 ✅
+
+## 五、问题清单（本轮新增）
+
+| 编号 | 级别 | 文件:行号 | 描述 | 建议 | 路由 |
+| --- | --- | --- | --- | --- | --- |
+| R2-1 | **P1** | `features/placement/api.ts:58` / `services/placement.service.ts` | Placement 交卷无任何调用 `/api/study-plan/rebuild`，PLACEMENT→重算闭环未接线 | 前端 submit 成功后调用；或在 `submitTest` 内服务端触发 | Engineer |
+| R2-2 | P2 | `src/tests/srs.spec.ts:120-132` | 「连续答对」用例每轮复位 mastery/cc，实为查表测试；真实常态下 120 档不可达，标题与语义不符 | 改标题为「ADVANCE 查表」；补一条**不复位**的真实连续答对用例并写明期望（常态 240 跳档） | Engineer |
+| R2-3 | P2 | `src/tests/plan-generator.spec.ts:92-106` | 「弱项≥2×强项」阈值恰等于数学上界（2.000），零裕量、靠取整+下限凑出，非加权设计使然；且与工程师自述 1.56× 不符（实测 1.8/1.908/2.0） | 改单调/≥1.5× 相对断言；产品意图由架构师在 §5.2.2 明确 | Architect 裁决 + Engineer |
+| R2-4 | P2 | `src/tests/plan-rebuild.spec.ts:22-42` | mock-prisma 无法证明真实并发安全（`$transaction` 直通、`upsert` 不判唯一键） | 保留为编排层测试；真库并发用例待 PG 恢复补 | Engineer（补验） |
+| R2-5 | P2 | `prisma/schema.prisma:917-934` | 新增 `source/weightSnapshot/weakHits` + `@@unique([userId,date,taskType])` 但**未执行 db push**；旧 DB 上运行新代码会报列不存在；且存量 `study_tasks` 可能违反新唯一约束导致 push 失败 | PG 恢复后 `db push`，先查存量重复 `(userId,date,taskType)` | Engineer（`[BLOCKED-ENV]`） |
+| R2-6 | P3 | `src/services/vocabulary/srs/srs.constants.ts:66` | ETA 依赖建模常量 120 天（非实测），结论脆弱 | 文档标注假设；有真实数据后回归替换 | Architect |
+
+## 六、`[BLOCKED-ENV]` 待 PG 恢复后补验清单
+
+1. `prisma db push` 能否成功落库（先校验存量 `study_tasks` 是否有重复 `(userId,date,taskType)`，否则唯一约束会失败）—— R2-5
+2. 真库**并发安全**验证：并发提交 onboarding / 并发 `rebuildTasks` 是否真被 `@@unique` + `skipDuplicates`/`upsert` 去重 —— R2-4
+3. **Placement → rebuild 端到端**：交卷后今日起 7 天未完成任务被重算、已完成任务行不变 —— R2-1 修复后复验
+4. 毕业递进在真实 `user_vocabulary` 行上的落库表现（`intervalDays` / `nextReviewAt` 写库一致性）
+5. 上一轮遗留：**E2E 10 条实跑**（本轮/上轮均因 dev 服务与 `test-results` 清理被本机 safe-delete 护栏拦截而未完成，属环境阻塞，非代码问题）
+
+## 七、批次 A 交付判定
+
+**CONDITIONAL PASS** —— 纯函数层（SRS 公式/权重生成/评分映射）实现正确、覆盖率高，可交付；
+但 **R2-1（PLACEMENT→rebuild 未接线，P1）必须在合并前修复**，否则 M1 闭环名存实亡；
+R2-2/R2-3/R2-4 为测试效力问题，需修正或明确其边界后再视为验收证据；
+R2-5 与第 2/3/5 项属环境阻塞，**必须待 PG 恢复后补验**方可解除条件。
