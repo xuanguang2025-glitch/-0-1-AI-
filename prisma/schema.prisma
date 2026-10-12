@@ -182,6 +182,25 @@ enum TaskSource {
   MANUAL
 }
 
+/// 听力训练模式（PRD §5.6 / Phase 2 设计 §5.2 的 7 种）
+enum ListeningMode {
+  INTENSIVE // 精听：逐句暂停 + 听写
+  EXTENSIVE // 泛听：整篇播放 + 理解题
+  DICTATION // 听写：整段默写 + 原文比对
+  CHOICE // 选择题
+  KEYWORD // 关键词捕捉：听填关键词
+  RETELL // 复述：听写后口头复述（Phase 3 接录音）
+  CLOZE // 完形填空听音
+}
+
+/// 听力生词/考点类型（§2.3）
+enum FocusPointType {
+  NEW_WORD
+  KEY_WORD
+  PHRASE
+  GRAMMAR
+}
+
 enum AiCapability {
   WORD_EXPLAIN // A1
   WRITING_REVIEW // A2
@@ -328,6 +347,7 @@ model User {
   userVocabularies   UserVocabulary[]
   speakingSessions   SpeakingSession[]
   listeningRecords   ListeningRecord[]
+  listeningProgress  ListeningProgress[]
   readingRecords     ReadingRecord[]
   writingSubmissions WritingSubmission[]
   translationRecords TranslationRecord[]
@@ -659,6 +679,12 @@ model ListeningMaterial {
   wordCount   Int           @default(0)
   /// ["cet4","news"] 多维标签
   tags        Json?
+  /// 预生成三档语速音频：[{"rate":0.75,"url":"..."},{"rate":1.0,"url":"..."},{"rate":1.25,"url":"..."}]
+  audioUrls   Json?
+  /// 训练强度阶梯：1=泛听入门 2=CET-4 标准 3=CET-6 强化 4=高阶精听（§5.2）
+  intensityLevel Int @default(1)
+  /// 生词/考点：[{word, meaning, startSec, type:'NEW_WORD'|'KEY_WORD'|'PHRASE'|'GRAMMAR'}]
+  focusPoints Json?
   coverUrl    String?
   playCount   Int           @default(0)
   status      PublishStatus @default(PUBLISHED)
@@ -670,10 +696,57 @@ model ListeningMaterial {
 
   questions ListeningQuestion[]
   records   ListeningRecord[]
+  assets    ListeningAudioAsset[]
+  progress  ListeningProgress[]
 
   @@index([category, difficulty, status])
   @@index([status, publishedAt])
+  @@index([intensityLevel, status])
   @@map("listening_materials")
+}
+
+/// 听力播放进度（L7 保存 / L2 恢复；每用户每材料一行）。
+/// 设计 §三 列出 L7 但未规定存储表，此处补齐（见交付说明：与设计的一处假设性偏差）。
+model ListeningProgress {
+  id           String   @id @default(cuid())
+  userId       String
+  materialId   String
+  /// 播放位置（秒）
+  positionSec  Int      @default(0)
+  playbackRate Float    @default(1.0)
+  completed    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material ListeningMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, materialId])
+  @@index([userId, updatedAt])
+  @@map("listening_progress")
+}
+
+/// 听力材料的多语速音频资产（Edge TTS 生成，一次生成多档；§2.1）
+model ListeningAudioAsset {
+  id          String   @id @default(cuid())
+  materialId  String
+  /// 语速档：0.75 | 1.0 | 1.25（倍速，Float）
+  rate        Float    @default(1.0)
+  url         String
+  /// 音频时长（秒），优先取 TTS 字幕末条 cue，退化到字节估算
+  durationSec Int
+  fileSize    Int?
+  /// 是否为 TTS 合成（false = 真人录音）
+  isTts       Boolean  @default(true)
+  /// edge-tts voice，如 en-US-AriaNeural
+  voiceName   String?
+  createdAt   DateTime @default(now())
+
+  material ListeningMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, rate])
+  @@index([materialId])
+  @@map("listening_audio_assets")
 }
 
 model ListeningQuestion {
