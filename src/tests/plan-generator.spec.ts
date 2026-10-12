@@ -13,6 +13,7 @@ import {
   COMPLETION_DOWNGRADE_THRESHOLD,
   STRONG_THRESHOLD,
   WEAK_BONUS,
+  WEAK_MINUTE_FLOOR,
   computePlanWeights,
   generateDailyTasks,
   normalizeAbility,
@@ -89,20 +90,47 @@ describe('§5.2.2 四条分支', () => {
   })
 })
 
-describe('★ 验收 2：弱项用户听力分钟数 ≥ 2 倍于强项用户', () => {
-  it('listening=30（弱项）vs listening=90（强项）：听力目标值差异 ≥2×', () => {
-    const weak = generateDailyTasks(
-      planInput({ ability: ability({ listening: 30, vocabulary: 90, reading: 90, writing: 90, speaking: 90 }) }),
-    )
-    const strong = generateDailyTasks(
-      planInput({ ability: ability({ listening: 90, vocabulary: 60, reading: 60, writing: 60, speaking: 60 }) }),
-    )
+describe('★ 验收 2（R2-3 裁决 · §5.2.3-(4)）：弱项用户听力分钟数显著高于强项', () => {
+  /**
+   * 口径变更（架构 docs/02-architecture.md §5.2.3-(4)）：
+   * 原验收「≥ 2×」只在取整上界 2.000 恰好成立、零裕量，已**废弃**（架构师明确否决调 BASE_WEIGHT/WEAK_BONUS：
+   * `+0.12` 时 round(30×0.2984)=9 与 `+0.08` 完全相同，调权重只会再造一个零裕量巧合）。
+   * 新口径三件套：**(a) 严格单调 + (b) 比值 ≥ 1.5×（实测 1.8，留 ~20% 裕量）+ (c) 弱项维度绝对下限 8 分钟/日**。
+   *
+   * 受控单变量：其余维度全部固定为 50，**只翻转 listening 30 ↔ 90**。
+   * （原实现连同其余维度一起改来凑 2.0×，属跨画像比较，已删除。）
+   */
+  it('(a)(b) 受控单变量 listening 30 ↔ 90：弱项 9 > 强项 5，比值 1.8 ≥ 1.5×', () => {
+    const weak = generateDailyTasks(planInput({ ability: ability({ listening: 30 }) }))
+    const strong = generateDailyTasks(planInput({ ability: ability({ listening: 90 }) }))
+
     const weakListening = taskOf(weak, 'LISTENING')?.target ?? 0
     const strongListening = taskOf(strong, 'LISTENING')?.target ?? 0
-    // 弱项 10 分钟 vs 强项 5 分钟
-    expect(weakListening).toBe(10)
+
+    // 受控推导：弱项 → LISTENING 0.33/1.16 → round(30×0.28448)=9
+    //           强项 → LISTENING (0.25-0.05)/1.11=0.18018 → round(30×0.18018)=5
+    expect(weakListening).toBe(9)
     expect(strongListening).toBe(5)
-    expect(weakListening).toBeGreaterThanOrEqual(strongListening * 2)
+
+    // (a) 严格单调
+    expect(weakListening).toBeGreaterThan(strongListening)
+    // (b) 比值 ≥ 1.5×（实测 9/5 = 1.8）
+    expect(weakListening / strongListening).toBeGreaterThanOrEqual(1.5)
+  })
+
+  it('(c) 独立不变量：弱项画像下 LISTENING 每日目标 ≥ WEAK_MINUTE_FLOOR 分钟', () => {
+    const listening = taskOf(generateDailyTasks(planInput({ ability: ability({ listening: 30 }) })), 'LISTENING')
+    expect(listening?.target).toBeGreaterThanOrEqual(WEAK_MINUTE_FLOOR)
+    // 反证该下限是「弱项专属」而非全局地板：强项画像下不施加（实测 5 < 8），
+    // 否则会把强项也拉平、抹掉 (a) 的单调性。
+    const strongListening = taskOf(generateDailyTasks(planInput({ ability: ability({ listening: 90 }) })), 'LISTENING')?.target ?? 0
+    expect(strongListening).toBeLessThan(WEAK_MINUTE_FLOOR)
+  })
+
+  it('(c) 护栏对所有 M 成立：小 M=20 下弱项听力仍被拉到 8 分钟', () => {
+    // 无护栏时 round(20×0.28448)=6 < 8 → 由 WEAK_MINUTE_FLOOR 拉起
+    const listening = taskOf(generateDailyTasks(planInput({ dailyMinutes: 20, ability: ability({ listening: 30 }) })), 'LISTENING')
+    expect(listening?.target).toBe(WEAK_MINUTE_FLOOR)
   })
 })
 

@@ -8,6 +8,8 @@
  *   ③ 考试目标加权：CET4/6 → 阅读 +0.05、听力 +0.05、口语 -0.10
  *   ④ 完成率自适应：avgCompletionRate < 0.5 → 总时长 × 0.8
  *   ⑤ 归一化后按模块系数折算为具体任务目标值
+ *   ⑥ 弱项护栏（§5.2.3-(4) R2-3 裁决）：弱项命中的**分钟型**模块每日目标不低于 8 分钟，
+ *      避免小 M（如 20 → 6）把弱项稀释到「有效暴露」以下。
  *
  * 纯函数、无 IO：单测覆盖 4 条分支（弱项/强项/CET/完成率降档）。
  *
@@ -100,6 +102,16 @@ export const CARRY_LISTENING_BONUS = 0.05
 export const CARRY_SPEAKING_PENALTY = 0.1
 export const COMPLETION_DOWNGRADE_THRESHOLD = 0.5
 export const COMPLETION_DOWNGRADE_FACTOR = 0.8
+
+/**
+ * 弱项命中的「分钟型」模块每日最小有效暴露（分钟）。
+ *
+ * 背景（架构 §5.2.3-(4) R2-3 裁决）：原验收「弱项听力分钟数 ≥ 2 倍强项」
+ * 只在取整上界 2.000 恰好成立、零裕量，已废弃。新口径为三件套：
+ *   严格单调 + 比值 ≥ 1.5×（M=30 受控单变量实测 9/5 = 1.8）+ 弱项维度绝对下限 8 分钟/日。
+ * 基准 M=30 时现值 9 已 ≥ 8；此护栏保证下限对**所有 M** 成立（M=20 → 6 < 8 时拉起）。
+ */
+export const WEAK_MINUTE_FLOOR = 8
 
 /** 弱项选择顺序（仅含可映射到任务模块的维度） */
 export const WEIGHT_MODULES: readonly WeightModule[] = ['VOCAB', 'LISTENING', 'READING', 'WRITING', 'SPEAKING']
@@ -236,21 +248,30 @@ export function computePlanWeights(input: PlanInput): PlanWeights {
  * 目标值 ≤ 0 的任务会被过滤（如 CET 目标下 SPEAKING 归零）。
  */
 export function generateDailyTasks(input: PlanInput): GeneratedTask[] {
-  const { weights, baseMinutes: M, weakHits } = computePlanWeights(input)
+  const { weights, baseMinutes: M, weakKeys, weakHits } = computePlanWeights(input)
   const dueReviewCount = Math.max(0, Math.round(input.dueReviewCount))
   const hasWeakHits = Object.keys(weakHits).length > 0
+
+  /**
+   * 弱项护栏（§5.2.3-(4)）：弱项命中的分钟型模块拉到最小有效暴露。
+   * 目标本为 0 的模块不拉起（避免把 CET 目标下已归零的 SPEAKING 重新变出来）。
+   */
+  const applyWeakFloor = (type: WeightModule, base: number): number => {
+    if (base <= 0 || !weakKeys.includes(type)) return base
+    return Math.max(base, WEAK_MINUTE_FLOOR)
+  }
 
   const targets: Array<{ type: PlanTaskType; target: number }> = [
     // ~1.2 词/分钟
     { type: 'VOCAB', target: clampInt(M * weights.VOCAB * 1.2, 10, 60) },
     // 复习量受到期池约束
     { type: 'REVIEW', target: Math.min(dueReviewCount, clampInt(M * weights.VOCAB * 0.8, 0, 600) + 10) },
-    { type: 'LISTENING', target: Math.max(clampInt(M * weights.LISTENING, 0, 600), 5) },
+    { type: 'LISTENING', target: applyWeakFloor('LISTENING', Math.max(clampInt(M * weights.LISTENING, 0, 600), 5)) },
     // ~8 min/篇
     { type: 'READING', target: clampInt((M * weights.READING) / 8, 1, 5) },
     // ~25 min/篇
     { type: 'WRITING', target: clampInt((M * weights.WRITING) / 25, 0, 2) },
-    { type: 'SPEAKING', target: Math.max(clampInt(M * weights.SPEAKING, 0, 600), 0) },
+    { type: 'SPEAKING', target: applyWeakFloor('SPEAKING', Math.max(clampInt(M * weights.SPEAKING, 0, 600), 0)) },
   ]
 
   return targets
