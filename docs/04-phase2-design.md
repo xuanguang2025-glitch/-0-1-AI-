@@ -610,7 +610,7 @@ export function ruleScore(i: RuleScoreInput): RuleScoreOutput {
   1. `ADVANCE_INTERVALS.length === 8` 且末位为 `240`
   2. 单测：`reps=1..8` 连续答对，间隔序列断言为 `[1,3,7,14,30,60,120,240]`（EF=2.5 时）
   3. 单测：毕业递进 —— `mastery≥90 && consecutiveCorrect≥3` 后连续答对，间隔为 `60 → 120 → 240`
-  4. 单测：`estimateReviewLoad(5000 词, 平均间隔 120 天)` 返回 **≤ 400 秒/天**
+  4. 单测：`estimateReviewLoad(5000 词, 平均间隔 120 天)` 返回 **≤ 400 秒/天**（⚠️ `120` 为**建模假设值**、非实测；结论前提与回归替换条件见架构 §5.1.4 R2-6）
   5. **回归**：`vocabulary_reviews` 已有数据不被破坏（只影响新推进的 `nextReviewAt`）
   6. 覆盖率门禁：SRS 模块 **≥ 95%**（当前 97.79%，不得回退）
 
@@ -626,7 +626,9 @@ export function ruleScore(i: RuleScoreInput): RuleScoreOutput {
   - `src/tests/plan-generator.spec.ts`（**新建**）
 - **验收标准**：
   1. 单测覆盖 4 条分支：弱项加权 / 强项减权 / CET 加权 / 完成率降档（<0.5 → ×0.8）
-  2. 单测：`listening=30` 弱项用户的听力分钟数 **≥ 2 倍**于 `listening=90` 用户
+  2. 单测（**R2-3 裁决重写**，见架构 §5.2.3）：固定其它维度、仅切换 `listening`，
+     **(a)** 单调性 `weak > strong`；**(b)** 比值 `weak / strong ≥ 1.5`（受控 M=30 实测 9/5 = 1.8）；
+     **(c)** 弱项维度每日 ≥ 8 min。原「≥ 2 倍」为数学上界擦边值（1.8–2.0 靠取整+下限凑出、零裕量），**已废弃**
   3. 单测：CET4 目标用户 `SPEAKING` 占比 ≤ 5%，`READING + LISTENING` ≥ 45%
   4. **幂等**：同 `(userId, date, taskType)` 重跑不产生重复行（`@@unique` 约束 + `skipDuplicates`）
   5. **并发**：`generateFirstWeekTasks` 改为 `$transaction` + `upsert`，并发双提交不重复生成（修 QA #10）
@@ -898,8 +900,8 @@ graph TD
 
 | # | 判定项 | 可测方式 |
 | --- | --- | --- |
-| 1 | **T11/T12 落地**：SRS 阶梯 8 档 + 毕业三级递进；`estimateReviewLoad(5000词)` ≤ 400s/天 | 单测断言 |
-| 2 | 权重式任务生成生效，弱项用户任务结构差异 ≥ 2 倍 | 单测断言 |
+| 1 | **T11/T12 落地**：SRS 阶梯 8 档 + 毕业三级递进；`estimateReviewLoad(5000词)` ≤ 400s/天（**假设口径**：稳态均值 120 天，见架构 §5.1.4 R2-6） | 单测断言 |
+| 2 | 权重式任务生成生效：仅切换听力能力分时 `weak > strong` 且 `weak/strong ≥ 1.5`，弱项维度 ≥ 8 min/天（R2-3 裁决） | 单测断言 |
 | 3 | 听力 60 篇 + 180 个音频文件**实际存在且可播放** | 脚本校验文件存在 + 手工播放 |
 | 4 | 听力 6 模式可完成并提交，报告含正确率 | E2E |
 | 5 | 阅读 quiz + 定位 + 划词可用，错题自动入库 | E2E |
