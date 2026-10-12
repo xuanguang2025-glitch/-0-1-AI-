@@ -117,9 +117,11 @@ describe('长尾阶梯（架构 §5.1.4 裁决 B-1，P0）：8 档 [1,3,7,14,30,
     expect(ADVANCE_INTERVALS[ADVANCE_INTERVALS.length - 1]).toBe(240)
   })
 
-  it('EF=2.5 连续答对 reps=1..8：间隔序列恰为 [1,3,7,14,30,60,120,240]', () => {
-    // rating=4 时 EF 增量为 0（不变量），缩放系数恒为 1.0，可直接验证间隔表；
-    // 每轮复位 mastery/连续计数以隔离「毕业分支」，只让 reps 递增驱动查表下标。
+  it('ADVANCE 查表：EF=2.5（缩放系数 1.0）时 reps=1..8 依次取 [1,3,7,14,30,60,120,240]', () => {
+    // 本用例只验证「ADVANCE 查表」本身——**非**真实连续答对序列（QA 第四轮 R2-2 已指出原标题误导）：
+    // rating=4 时 EF 增量为 0（不变量），缩放系数恒为 1.0，可直接读到间隔表原值；
+    // 每轮人为复位 mastery/连续计数，是为隔离「毕业分支」，让 reps 递增单独驱动查表下标。
+    // 真实（不复位）连续序列见下一 describe：毕业会**跳过**表中尚未消费的档位。
     let s = freshState({ masteryScore: 10 })
     const intervals: number[] = []
     for (let i = 0; i < 8; i++) {
@@ -130,6 +132,57 @@ describe('长尾阶梯（架构 §5.1.4 裁决 B-1，P0）：8 档 [1,3,7,14,30,
       s = { ...out, masteryScore: 10, consecutiveCorrect: 0 }
     }
     expect(intervals).toEqual([1, 3, 7, 14, 30, 60, 120, 240])
+  })
+})
+
+describe('真实连续答对序列（不复位，QA 第四轮 R2-2）', () => {
+  /*
+   * 与上一条「隔离毕业分支」的查表用例不同，这里**不复位** mastery / consecutiveCorrect，
+   * 完整跑真实推进；断言取自 QA 独立驱动的实测序列（本机复核一致）。
+   *
+   * ⚠️ 设计意图说明（**不要**为了让序列「符合直觉」而改公式）：
+   *   - ADVANCE 路径的间隔表 [1,3,7,14,30,60,120,240] 只在「未毕业」时逐档消费；
+   *   - 一旦 mastery≥90 且连续答对≥3，即切到 MASTERED 毕业递进 GRADUATED_INTERVALS=[60,120,240]，
+   *     下标 = reps - MIN_GRADUATE_REPS(=5)，因而会**跳过** ADVANCE 表中尚未消费的档位；
+   *   - 所以「答得越快（mastery 增速越高）→ 毕业越早 → 被跳过的中间档越多」是**预期行为**：
+   *     让已掌握词尽快沉入长尾、少占复习队列（§5.1.4 裁决 B）。
+   */
+  it('rating=4 常态 8s：r6 触发毕业（下标=1）直接取 120，跳过 ADVANCE 首档 60', () => {
+    let s = freshState()
+    const intervals: number[] = []
+    const paths: string[] = []
+    for (let i = 0; i < 7; i++) {
+      const out = advance(s, 4, 8000, NOW)
+      intervals.push(out.intervalDays)
+      paths.push(out.path)
+      s = { ...out }
+    }
+    // r1..r5 逐档 ADVANCE（1/3/7/14/30）；r6 mastery 80→94 触发 MASTERED，reps=6 → gradIndex=1 → 120；
+    // r7 递进到 240。注意：**60 被跳过**（不是 120 跳档）。
+    expect(intervals).toEqual([1, 3, 7, 14, 30, 120, 240])
+    expect(paths).toEqual(['ADVANCE', 'ADVANCE', 'ADVANCE', 'ADVANCE', 'ADVANCE', 'MASTERED', 'MASTERED'])
+  })
+
+  it('rating=4 慢速 15s：mastery 增速最慢 → 唯一走满 ADVANCE 全 8 档 [1,3,7,14,30,60,120,240]', () => {
+    let s = freshState()
+    const intervals: number[] = []
+    for (let i = 0; i < 8; i++) {
+      const out = advance(s, 4, 15000, NOW)
+      intervals.push(out.intervalDays)
+      s = { ...out }
+    }
+    expect(intervals).toEqual([1, 3, 7, 14, 30, 60, 120, 240])
+  })
+
+  it('rating=5 快速 2s：EF 升至 2.8（缩放 1.06）使 14→15，r5 达 mastery=100 毕业取首档 60', () => {
+    let s = freshState()
+    const intervals: number[] = []
+    for (let i = 0; i < 7; i++) {
+      const out = advance(s, 5, 2000, NOW)
+      intervals.push(out.intervalDays)
+      s = { ...out }
+    }
+    expect(intervals).toEqual([1, 3, 7, 15, 60, 120, 240])
   })
 })
 

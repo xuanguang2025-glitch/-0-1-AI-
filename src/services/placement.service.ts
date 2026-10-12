@@ -145,8 +145,29 @@ export async function saveAnswer(userId: string, testId: string, questionId: str
   await prisma.placementTest.update({ where: { id: testId }, data: { answers: slots as unknown as Prisma.InputJsonValue } })
 }
 
-/** 提交：规则评分 → CEFR → CET 估算 → 写 Profile 能力向量 + DailyStat；AI 报告独立降级 */
-export async function submitTest(userId: string, testId: string): Promise<{ scores: PlacementScores; cefr: string; cet: { cet4: number; cet6: number }; testId: string }> {
+/** submitTest 返回体（含计划重建结果标记，供前端提示「已按测评结果更新计划」） */
+export interface SubmitTestResult {
+  scores: PlacementScores
+  cefr: string
+  cet: { cet4: number; cet6: number }
+  testId: string
+  /** 交卷后服务端计划重建是否成功（失败不影响成绩，仅置 false） */
+  planRegenerated: boolean
+}
+
+/**
+ * 提交：规则评分 → CEFR → CET 估算 → 写 Profile 能力向量 + DailyStat；AI 报告独立降级。
+ *
+ * M1 闭环（架构 §5.2.2 / QA 第四轮 R2-1）：交卷是「能力向量」的唯一写入点，
+ * 也是计划必须重算的**权威触发点**。此处**在服务端**触发 `rebuildTasks`，
+ * 而非依赖前端交卷后再发一次 `/api/study-plan/rebuild`：
+ *   1) 服务端触发不可被绕过（前端请求可被跳过/中断/被第三方契约绕过）；
+ *   2) 与 `abilityVector` 写入同一控制流，时序确定（评测刚落库即重算）；
+ *   3) 前端二次请求失败会静默断裂 M1 闭环（T12 commit 声称的触发链路实际从未被调用）。
+ * 事务边界：rebuild 置于**评测事务提交之后**，且用 try/catch 包裹——
+ *   评测成绩一旦落库即为既成事实，rebuild 属派生副作用，失败绝不回滚评测、也不阻断交卷响应。
+ */
+export async function submitTest(userId: string, testId: string): Promise<SubmitTestResult> {
   const test = await prisma.placementTest.findFirst({ where: { id: testId, userId, status: 'IN_PROGRESS' } })
   if (!test) throw errNotFound('进行中的测试不存在')
 
@@ -226,7 +247,18 @@ export async function submitTest(userId: string, testId: string): Promise<{ scor
     create: { userId, date: today, examCount: 1, correctCount: answered.filter((a) => a.isCorrect).length, wrongCount: answered.filter((a) => !a.isCorrect).length, xpEarned: 50 },
   })
 
-  return { scores, cefr, cet, testId }
+  // M1 闭环：成绩已落库后，服务端触发计划重建（尽力而为，失败不影响交卷）。
+  // 用动态 import 避免把 plan 层拉进 placement 的模块加载图（保持职责边界、避免潜在循环依赖）。
+  let planRegenerated = false
+  try {
+    const { rebuildTasks } = await import('./plan/rebuild')
+    await rebuildTasks(userId, { kind: 'PLACEMENT_COMPLETED' })
+    planRegenerated = true
+  } catch (error) {
+    log.warn({ msg: 'placement plan rebuild failed (non-blocking)', userId, testId, error: String(error) })
+  }
+
+  return { scores, cefr, cet, testId, planRegenerated }
 }
 
 /** 报告：测试 + 题目明细 */

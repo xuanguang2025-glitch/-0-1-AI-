@@ -54,8 +54,8 @@ export const placementApi = {
       }),
     ),
 
-  /** 交卷评分 */
-  submit: async (testId: string): Promise<{ scores: PlacementScoresDto; cefr: string; cet: { cet4: number; cet6: number }; testId: string }> =>
+  /** 交卷评分（服务端交卷成功后会顺带重算学习计划，planRegenerated 标记重算是否成功） */
+  submit: async (testId: string): Promise<{ scores: PlacementScoresDto; cefr: string; cet: { cet4: number; cet6: number }; testId: string; planRegenerated: boolean }> =>
     unwrap(await fetch(`/api/placement/${testId}/submit`, { method: 'POST', credentials: 'same-origin' })),
 
   /** 报告 */
