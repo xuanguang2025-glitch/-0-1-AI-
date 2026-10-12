@@ -10,17 +10,19 @@
 
 | 模块 | 说明 | 状态 |
 | --- | --- | --- |
-| 🧠 词汇 + SRS | 间隔重复引擎（SM-2 变体），掌握度 0-100、六状态、1/3/7/14/30 天间隔，服务端结算 | ✅ |
-| 📊 水平测试 | 30 题 Placement Test，规则评分 → CEFR（A1-C2）→ CET 分数估算 | ✅ |
+| 🧠 词汇 + SRS | 间隔重复引擎（SM-2 变体），掌握度 0-100、六状态、8 档间隔 `1/3/7/14/30/60/120/240` 天，毕业 `60→120→240` 三级递进，复习负担预估 | ✅ |
+| 📊 水平测试 | 30 题 Placement Test，规则评分 → CEFR（A1-C2）→ CET 分数估算；**交卷后服务端自动重算学习计划** | ✅ |
+| 🎯 学习计划 | 权重式每日任务生成（弱项加权 + 弱项每日分钟下限），Placement 交卷 / 每日定时 / 计划调整三时机触发，唯一键幂等 | ✅ |
 | 🤖 AI Gateway | 18 项 AI 能力统一网关：DeepSeek / OpenAI 兼容 / Ollama / **Mock 零配置**，SSE 流式，结构化输出校验，逐能力降级 | ✅ |
 | 🔐 认证授权 | JWT 双 Token 轮换 + 重放检测（整族撤销）、argon2id、RBAC、CSRF、限流、登录锁定 | ✅ |
 | 🏠 Dashboard | 今日进度环 · 今日任务 · 能力雷达 · AI 建议 · 连续学习 Streak · 等级环 | ✅ |
 | 📈 学习统计 | 预聚合 `daily_learning_stats`，30 天趋势 / 热力日历 / 分模块正确率 | ✅ |
 | 🌗 体验 | Light / Dark / System 主题 · 中英双语 · PC Sidebar / 移动 BottomNav · 首屏 JS 102kB gzip | ✅ |
 | 📚 词库 | 开源 [ECDICT](https://github.com/skywind3000/ECDICT)（MIT）精简导入：CET-4 3000 词 + CET-6 2000 词 | ✅ |
-| 🎧 听力 / 口语 / 阅读 / 写作 / 翻译 / 语法 / CET 专区 / 模拟考试 | Phase 2-4 交付 | 🚧 |
+| 🎧 听力 | 60 篇材料 × 3 档语速（Edge TTS 合成，111 个 mp3 + VTT 字幕），难度阶梯 1-4；听写判分走确定性算法，**0 依赖 AI** | ✅ |
+| 🗣️ 口语 / 📖 阅读 / ✍️ 写作批改 / 🌐 翻译 / 📐 语法 / CET 专区 / 模拟考试 | Phase 2-4 交付 | 🚧 |
 
-> 设计文档：[`docs/01-prd.md`](docs/01-prd.md)（产品需求与 77 页信息架构）· [`docs/02-architecture.md`](docs/02-architecture.md)（技术架构：52 表 / 140 API / 算法约定）
+> 设计文档：[`docs/01-prd.md`](docs/01-prd.md)（产品需求与 77 页信息架构）· [`docs/02-architecture.md`](docs/02-architecture.md)（技术架构：52 表 / 140 API / 算法约定）· [`docs/04-phase2-design.md`](docs/04-phase2-design.md)（Phase 2 范围与任务分解）· [`docs/03-qa-report.md`](docs/03-qa-report.md)（四轮独立验证记录）
 
 ---
 
@@ -64,6 +66,8 @@ npm run dev               # http://localhost:3000
 | `npm run check:env` | 校验 env 完整性 + Node 版本 + DB 连通性 |
 | `npm run db:fetch:vocab` | 下载 ECDICT 全量词库到 `.data/ecdict/ecdict.csv` |
 | `npm run db:build:vocab` | 流式解析词库 → 生成 `prisma/data/cet4-words.csv` / `cet6-words.csv` |
+| `npm run audio:gen` | Edge TTS 生成听力音频（3 档语速 + VTT 字幕，需 `edge-tts` CLI） |
+| `npm run test:coverage` | Vitest + 覆盖率门禁（核心算法 ≥80%，门禁真实生效） |
 
 ---
 
@@ -164,7 +168,7 @@ npm install --legacy-peer-deps
 ## 🧪 测试
 
 ```bash
-npm run test        # Vitest 单测（SRS / CEFR 映射 / 认证等核心算法）
+npm run test        # Vitest 单测（153 个用例：SRS / CEFR / 学习计划生成 / 听力判分 / 限流 / 时区 / Mock AI）
 npx playwright test # E2E（Phase 1 收尾接入：注册→测评→看板→学词 8 条链路）
 ```
 
@@ -174,10 +178,10 @@ npx playwright test # E2E（Phase 1 收尾接入：注册→测评→看板→�
 
 | Phase | 内容 | 状态 |
 | --- | --- | --- |
-| **Phase 1** | 基础设施 · 数据层 · 认证 · UI 框架 · AI Gateway · 测评 · Dashboard · 词汇 SRS · 统计 · 个人中心 | 🚧 收尾（T10 联调 + E2E） |
-| Phase 2 | 听力 · 阅读 · 语法 · 写作批改 · 翻译 | ⏳ |
-| Phase 3 | AI Tutor 对话 · 口语评分 · 发音训练 | ⏳ |
-| Phase 4 | CET-4/6 专区 · 模拟考试引擎 · 错题本 | ⏳ |
+| **Phase 1** | 基础设施 · 数据层 · 认证 · UI 框架 · AI Gateway · 测评 · Dashboard · 词汇 SRS · 统计 · 个人中心 | ✅ 完成 |
+| **Phase 2** | 听力 ✅ · 权重式学习计划 ✅ · 阅读 · 语法 · 写作批改 · 翻译 · 口语 | 🚧 进行中 |
+| Phase 3 | AI Tutor 对话 · 口语规则评分 · 发音训练（云 ASR 预留） | ⏳ |
+| Phase 4 | CET-4/6 专项卷 · 错题本（完整模考+710 分制待标定样本） | ⏳ |
 | Phase 5 | 成就 · 排行榜 · 推荐引擎 · 每日挑战 | ⏳ |
 | Phase 6 | 管理后台 · 安全加固 · 部署 | ⏳ |
 
@@ -200,12 +204,14 @@ npx playwright test # E2E（Phase 1 收尾接入：注册→测评→看板→�
 prisma/       schema.prisma(52表) · migrations · seed/** · data/*.csv
 scripts/      pg-daemon.mjs · pg-stop.mjs · pg-status.mjs · use-driver.ts
               fetch-ecdict.mjs · build-vocab-csv.ts · check-env.ts · gen-sqlite-schema.ts
+              gen-listening-audio.ts · gen-listening-audio.db.ts
+public/audio/listening/  111 个 TTS mp3 + VTT 字幕（随仓库分发，部署必需）
 src/app/      路由（[locale]/(auth)/(app)/api/**）
 src/features/ 按功能域拆分的页面模块（auth/landing/onboarding/vocabulary/...）
-src/services/ 领域服务（auth/vocabulary+srs/placement/analytics/ai+gateway/...）
+src/services/ 领域服务（auth/vocabulary+srs/placement/analytics/ai+gateway/plan/listening/...）
 src/lib/      api envelope · auth 基建 · cache · db · i18n · logger
 src/components/ ui 原语 · layout · charts · common · feedback
-docs/         01-prd.md · 02-architecture.md
+docs/         01-prd.md · 02-architecture.md · 03-qa-report.md · 04-phase2-design.md
 ```
 
 ---
