@@ -60,3 +60,7 @@ coverage-qa/
 qa-coverage-out.txt
 qa-cov*.txt
 .qa-e2e-out/
+
+# ---- TTS 中间产物：.vtt 仅用于取 durationSec，读后即删（scripts/gen-listening-audio.ts 同款行为） ----
+public/audio/listening/*.vtt
+.data/

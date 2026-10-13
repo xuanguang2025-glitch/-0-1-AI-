@@ -17,6 +17,7 @@ async function main(): Promise<void> {
   const { seedAdmin } = await import('./seed-admin')
   const { seedVocabulary } = await import('./seed-vocabulary')
   const { seedContent } = await import('./seed-content')
+  const { seedListeningP2 } = await import('./seed-listening-p2')
   const { seedQuestions } = await import('./seed-questions')
   const { seedAi } = await import('./seed-ai')
   const { seedAchievements } = await import('./seed-achievements')
@@ -25,6 +26,8 @@ async function main(): Promise<void> {
   await seedAdmin()
   await seedVocabulary()
   await seedContent()
+  // Phase 2 听力 60 篇覆盖 Phase 1 的 20 篇（内容 + 题目 + 音频资产登记）
+  await seedListeningP2()
   await seedQuestions()
   await seedAi()
   await seedAchievements()
