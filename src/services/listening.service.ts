@@ -5,7 +5,9 @@
  *   - **判分全部走确定性算法**（客观题精确匹配 / 关键词模糊匹配 / 听写本地 diff），
  *     0 个依赖 AI —— 保证 Mock 阶段听力模块完整可用；
  *   - AI 只在「报告分析 / 下一步建议」两处介入（A12），且有规则兜底，不会不可用；
- *   - 字幕时间轴按词数估算（`ladder.estimateTimeline`），不用 TTS 输出（§5.1 局限③）。
+ *   - 字幕时间轴：有 `listening_audio_assets.durationSec` 时按**真实时长等比缩放**，
+ *     无资产时按 `词数 / (wpm × rate) × 60` 估算（R2-9：估算口径与 `recommendedRate()`
+ *     方向一致，否则 0.75× 减速播放时字幕会跑在音频前面）。
  *
  * 本文件为 DB 编排层；纯算法在 `./listening/{dictation,ladder}`。
  */
@@ -24,6 +26,9 @@ import {
 import {
   modeMeta,
   recommendedRate,
+  timelineForRate,
+  timelineTotalSec,
+  wpmForIntensity,
   type JudgeKind,
   type ListeningModeKey,
   type TimelineLine,
@@ -76,6 +81,22 @@ export interface ListeningProgressDto {
   completed: boolean
 }
 
+/**
+ * 某一语速档下的时间基准（R2-9）。
+ *
+ * 同一篇材料的三档音频是三个独立 mp3、时长不同，因此时间轴必须**按档给出**：
+ * `transcript` / `focusPoints` 都落在该档的真实时间轴上，前端换档直接换整套基准，
+ * 不需要在客户端做任何时间换算（避免换算逻辑漂移）。
+ */
+export interface ListeningTimebaseDto {
+  /** 该档音频总时长（秒）：真实资产时长，或无资产时的估算值 */
+  durationSec: number
+  /** 该档语速下的字幕时间轴 */
+  transcript: TimelineLine[]
+  /** 该档语速下的考点定位（与 transcript 同基准） */
+  focusPoints: ListeningFocusPointDto[]
+}
+
 /** 材料列表用的进度行（含 materialId，便于回填） */
 interface ProgressRow {
   materialId: string
@@ -117,9 +138,13 @@ export interface ListeningDetail {
   audioUrl: string
   audioUrls: ListeningAudioUrlDto[]
   recommendedRate: number
+  /** 兼容字段：推荐档下的字幕时间轴（= timebases[recommendedRate].transcript） */
   transcript: TimelineLine[]
   translation: string | null
+  /** 兼容字段：推荐档下的考点定位 */
   focusPoints: ListeningFocusPointDto[]
+  /** 按语速档（键为 rate 字符串，如 '0.75' / '1' / '1.25'）的完整时间基准 */
+  timebases: Record<string, ListeningTimebaseDto>
   progress: ListeningProgressDto | null
   /** Phase 2 可用的 6 个模式（RETELL 移 Phase 3） */
   availableModes: ListeningModeKey[]
@@ -143,8 +168,10 @@ export interface ListeningQuestionsResult {
   /** Phase 2 是否可用（RETELL 为 false → 前端显示「即将上线」） */
   available: boolean
   questions: ListeningQuestionItem[]
-  /** 听写 / 精听模式的原文（按句） */
+  /** 兼容字段：推荐档下的原文（按句） */
   transcript: TimelineLine[] | null
+  /** 按语速档的完整时间基准（换档时前端整套替换） */
+  timebases: Record<string, ListeningTimebaseDto>
 }
 
 export interface ListeningAttemptInput {
@@ -412,6 +439,44 @@ async function audioUrlDtos(materialId: string, fallback: unknown): Promise<List
   })
 }
 
+/** 组装某一档语速的时间基准（R2-9） */
+function buildTimebase(
+  material: { intensityLevel: number; transcript: unknown; focusPoints: unknown },
+  rate: number,
+  realDurationSec: number | null,
+): ListeningTimebaseDto {
+  const baseline = parseTranscript(material.transcript)
+  const timeline = timelineForRate(baseline, wpmForIntensity(material.intensityLevel), rate, realDurationSec)
+  // 考点定位与字幕同基准：按「该档总时长 / 基准总时长」线性映射
+  const baseTotal = timelineTotalSec(baseline)
+  const factor = baseTotal > 0 ? timelineTotalSec(timeline) / baseTotal : 1
+  const focusPoints = parseFocusPoints(material.focusPoints).map((fp) => ({
+    ...fp,
+    startSec: Number((fp.startSec * factor).toFixed(1)),
+  }))
+  return { durationSec: Math.round(timelineTotalSec(timeline)), transcript: timeline, focusPoints }
+}
+
+/**
+ * 组装全部语速档的时间基准。
+ *
+ * 档位 = 材料声明档（`audioUrls`）∪ {推荐档}；每档独立取自己的真实音频时长，
+ * 无资产则该档走「与 recommendedRate 方向一致」的词数估算。
+ */
+function buildTimebases(
+  material: { intensityLevel: number; transcript: unknown; focusPoints: unknown },
+  urls: ListeningAudioUrlDto[],
+): Record<string, ListeningTimebaseDto> {
+  const durationByRate = new Map(urls.map((u) => [u.rate, u.durationSec]))
+  const rates = new Set<number>(urls.map((u) => u.rate))
+  rates.add(recommendedRate(material.intensityLevel))
+  const out: Record<string, ListeningTimebaseDto> = {}
+  for (const rate of rates) {
+    out[String(rate)] = buildTimebase(material, rate, durationByRate.get(rate) ?? null)
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // L1 材料列表
 // ---------------------------------------------------------------------------
@@ -533,6 +598,11 @@ export async function getMaterialDetail(userId: string, materialId: string): Pro
     select: { positionSec: true, playbackRate: true, completed: true },
   })
 
+  const audioUrls = await audioUrlDtos(material.id, material.audioUrls)
+  const rate = recommendedRate(material.intensityLevel)
+  const timebases = buildTimebases(material, audioUrls)
+  const recommended = timebases[String(rate)] ?? buildTimebase(material, rate, null)
+
   return {
     id: material.id,
     title: material.title,
@@ -544,11 +614,12 @@ export async function getMaterialDetail(userId: string, materialId: string): Pro
     durationSec: material.durationSec,
     wordCount: material.wordCount,
     audioUrl: material.audioUrl,
-    audioUrls: await audioUrlDtos(material.id, material.audioUrls),
-    recommendedRate: recommendedRate(material.intensityLevel),
-    transcript: parseTranscript(material.transcript),
+    audioUrls,
+    recommendedRate: rate,
+    transcript: recommended.transcript,
     translation: material.translation,
-    focusPoints: parseFocusPoints(material.focusPoints),
+    focusPoints: recommended.focusPoints,
+    timebases,
     progress: progress
       ? { positionSec: progress.positionSec, playbackRate: progress.playbackRate, completed: progress.completed }
       : null,
@@ -572,14 +643,20 @@ export async function getModeQuestions(userId: string, materialId: string, mode:
   const meta = modeMeta(key)
   const base = { materialId, mode: key, judge: meta.judge, available: meta.available }
 
+  // 时间轴按语速档给出（R2-9）；客观题模式用不到，但统一返回，前端无需再请求
+  const audioUrls = await audioUrlDtos(material.id, material.audioUrls)
+  const timebases = buildTimebases(material, audioUrls)
+  const rate = recommendedRate(material.intensityLevel)
+  const recommended = timebases[String(rate)] ?? buildTimebase(material, rate, null)
+
   // RETELL：Phase 3 接录音，Phase 2 只声明不可用
   if (!meta.available) {
-    return { ...base, questions: [], transcript: null }
+    return { ...base, questions: [], transcript: null, timebases }
   }
 
   // 关键词捕捉：由 focusPoints 生成填空题（脚本判 fuzzy）
   if (key === 'KEYWORD') {
-    const fps = parseFocusPoints(material.focusPoints)
+    const fps = recommended.focusPoints
     return {
       ...base,
       questions: fps.map((fp, i) => ({
@@ -590,12 +667,13 @@ export async function getModeQuestions(userId: string, materialId: string, mode:
         hint: fp.meaning,
       })),
       transcript: null,
+      timebases,
     }
   }
 
   // 精听 / 听写：无客观题，返回原文逐句
   if (key === 'INTENSIVE' || key === 'DICTATION') {
-    return { ...base, questions: [], transcript: parseTranscript(material.transcript) }
+    return { ...base, questions: [], transcript: recommended.transcript, timebases }
   }
 
   // 客观题模式：EXTENSIVE / CHOICE / CLOZE → 按 knowledgePoints[0] 筛
@@ -611,6 +689,7 @@ export async function getModeQuestions(userId: string, materialId: string, mode:
       hint: null,
     })),
     transcript: null,
+    timebases,
   }
 }
 

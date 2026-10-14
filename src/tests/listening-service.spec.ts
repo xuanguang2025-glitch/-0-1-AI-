@@ -569,6 +569,81 @@ describe('L2 getMaterialDetail', () => {
   })
 })
 
+/**
+ * R2-9（架构师裁决的真 bug）：时间轴必须与播放倍速同向。
+ *
+ * 旧实现只按 `wpmForIntensity()` 估算、完全不看 rate，而 `recommendedRate()`
+ * 给 L3/L4 返回 0.75× 减速 → 真实音频比字幕长 1/0.75 倍，**字幕跑在音频前面**。
+ * 修复：有 `listening_audio_assets.durationSec` 用真实时长；无资产时估算式
+ * 改为 `词数 / (wpm × rate) × 60`（方向与 recommendedRate 一致）。
+ */
+describe('R2-9 时间基准按语速档给出（L2/L3）', () => {
+  beforeEach(() => {
+    h.materialFirst = material()
+    h.assets = []
+  })
+
+  it('① 有真实资产 → 该档时间轴总时长严格等于资产时长（不等估算值）', async () => {
+    h.assets = [
+      { materialId: 'lm-1', rate: 0.75, url: '/a_075.mp3', durationSec: 12 },
+      { materialId: 'lm-1', rate: 1, url: '/a_100.mp3', durationSec: 9 },
+      { materialId: 'lm-1', rate: 1.25, url: '/a_125.mp3', durationSec: 7 },
+    ]
+    const r = await getMaterialDetail('u1', 'lm-1')
+    expect(Object.keys(r.timebases).sort()).toEqual(['0.75', '1', '1.25'])
+    expect(r.timebases['0.75']?.durationSec).toBe(12)
+    expect(r.timebases['1']?.durationSec).toBe(9)
+    expect(r.timebases['1.25']?.durationSec).toBe(7)
+    // 末行 endSec 即该档总时长
+    const last = r.timebases['0.75']?.transcript.at(-1)
+    expect(last?.endSec).toBeCloseTo(12, 1)
+    // 音频 DTO 也带真实时长（列表页卡片用）
+    expect(r.audioUrls.find((u) => u.rate === 0.75)?.durationSec).toBe(12)
+  })
+
+  it('①b 考点与字幕同基准：按「该档总时长/基准总时长」线性映射', async () => {
+    h.assets = [{ materialId: 'lm-1', rate: 0.75, url: '/a_075.mp3', durationSec: 12 }]
+    const r = await getMaterialDetail('u1', 'lm-1')
+    // 基准总时长 9s（库里 transcript 末行 endSec），0.75 档拉到 12s → 系数 12/9
+    expect(r.timebases['0.75']?.focusPoints[1]?.startSec).toBeCloseTo((4 * 12) / 9, 1)
+    expect(r.timebases['0.75']?.focusPoints[0]?.startSec).toBe(0)
+  })
+
+  it('② 无资产 → fallback 估算与 recommendedRate 同向（0.75× 比 1.0× 长）', async () => {
+    const r = await getMaterialDetail('u1', 'lm-1')
+    const slow = r.timebases['0.75']?.durationSec ?? 0
+    const normal = r.timebases['1']?.durationSec ?? 0
+    expect(slow).toBeGreaterThan(normal)
+    // L1 推荐 1.0×：兼容字段 transcript 就是 1.0× 档
+    expect(r.recommendedRate).toBe(1)
+    expect(r.transcript).toEqual(r.timebases['1']?.transcript)
+  })
+
+  it('②b L3/L4（recommendedRate=0.75）→ 兼容字段取更慢的那档', async () => {
+    h.materialFirst = material({ intensityLevel: 3 })
+    const r = await getMaterialDetail('u1', 'lm-1')
+    expect(r.recommendedRate).toBe(0.75)
+    expect(r.transcript).toEqual(r.timebases['0.75']?.transcript)
+    expect(r.timebases['0.75']?.durationSec ?? 0).toBeGreaterThan(r.timebases['1']?.durationSec ?? 0)
+    // 考点同样落在慢档时间轴上
+    expect(r.focusPoints).toEqual(r.timebases['0.75']?.focusPoints)
+  })
+
+  it('③ L3 DICTATION 的原文 = 推荐档时间轴（前端换档用 timebases）', async () => {
+    h.materialFirst = material({ intensityLevel: 4 })
+    const r = await getModeQuestions('u1', 'lm-1', 'DICTATION')
+    expect(r.transcript).toEqual(r.timebases['0.75']?.transcript)
+    expect(Object.keys(r.timebases).sort()).toEqual(['0.75', '1', '1.25'])
+  })
+
+  it('③b 材料无 audioUrls（Phase 1 遗留）→ 至少给出推荐档，不返回空 timebases', async () => {
+    h.materialFirst = material({ audioUrls: [] })
+    const r = await getMaterialDetail('u1', 'lm-1')
+    expect(Object.keys(r.timebases)).toEqual(['1'])
+    expect(r.transcript).toHaveLength(2)
+  })
+})
+
 describe('L8 checkDictation — 纯本地 diff 透传', () => {
   it('确定性输出（同输入同结果）', () => {
     const a = checkDictation('I would like a latte', 'I would like a latte')

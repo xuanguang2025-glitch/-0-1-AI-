@@ -90,18 +90,27 @@ export interface TimelineLine {
 }
 
 /**
- * 字幕时间轴估算（按词数比例）：每句时长 = 词数 / wpm × 60，最短 2 秒。
+ * 字幕时间轴估算（按词数比例）：每句时长 = 词数 / (wpm × rate) × 60，最短 2 秒。
  * 明确**不使用 TTS 输出**做时间轴（§5.1 局限③）。
+ *
+ * `rate` 为**播放倍速**（0.75 / 1.0 / 1.25），必须参与分母：
+ *   - 墙钟时长 = 词数 / (wpm × rate) × 60，倍速越低每句越长；
+ *   - 这与 `recommendedRate()`（L3/L4 → 0.75× 减速）方向一致。
+ *
+ * ⚠️ R2-9 之前的版本只按 `wpm` 估算、完全不看 `rate`：L3/L4 用户按 0.75× 播放时，
+ * 真实音频总长是估算值的 1/0.75 ≈ 1.33 倍，字幕整体**跑在音频前面**（越听越超前）。
  */
 export function estimateTimeline(
   lines: Array<{ en: string; zh: string }>,
   wpm: number,
+  rate = 1,
 ): TimelineLine[] {
   const safeWpm = wpm > 0 ? wpm : 120
+  const safeRate = rate > 0 ? rate : 1
   let cursor = 0
   return lines.map((line) => {
     const words = line.en.trim().split(/\s+/).filter(Boolean).length
-    const dur = Math.max(2, (words / safeWpm) * 60)
+    const dur = Math.max(2, (words / (safeWpm * safeRate)) * 60)
     const startSec = Number(cursor.toFixed(1))
     const endSec = Number((cursor + dur).toFixed(1))
     cursor += dur
@@ -109,10 +118,59 @@ export function estimateTimeline(
   })
 }
 
-/** 估算总时长（秒） */
+/** 时间轴总时长（秒）= 末行 endSec */
+export function timelineTotalSec(timeline: TimelineLine[]): number {
+  return timeline[timeline.length - 1]?.endSec ?? 0
+}
+
+/**
+ * 按目标总时长**等比缩放**时间轴（行间比例不变）。
+ *
+ * 用于把「词数估算的基准时间轴」校准到 `listening_audio_assets.durationSec`
+ * 测得的真实音频时长——这是消除估算偏差的唯一可靠来源。
+ */
+export function scaleTimeline(timeline: TimelineLine[], totalSec: number): TimelineLine[] {
+  const base = timelineTotalSec(timeline)
+  if (base <= 0 || totalSec <= 0) return timeline.map((l) => ({ ...l }))
+  const k = totalSec / base
+  return timeline.map((l) => ({
+    startSec: Number((l.startSec * k).toFixed(1)),
+    endSec: Number((l.endSec * k).toFixed(1)),
+    en: l.en,
+    zh: l.zh,
+  }))
+}
+
+/**
+ * 按语速档生成时间轴（R2-9 修复入口）：
+ *   ① **有真实音频资产**（`listening_audio_assets.durationSec`）→ 以真实总时长
+ *      等比缩放基准时间轴，字幕与音频严格对齐；
+ *   ② 无资产 → 用 `词数 / (wpm × rate) × 60` 重新估算，倍速越低每句墙钟时长越长，
+ *      与 `recommendedRate()` 方向一致（不会再出现「字幕跑在音频前面」）。
+ *
+ * @param baseline 库里存的基准时间轴（rate = 1.0 口径，seed 时生成）
+ * @param wpm      该强度档的词/分钟基准（`wpmForIntensity`）
+ * @param rate     播放倍速
+ * @param realDurationSec 该档音频的真实时长；无资产传 null
+ */
+export function timelineForRate(
+  baseline: TimelineLine[],
+  wpm: number,
+  rate: number,
+  realDurationSec: number | null,
+): TimelineLine[] {
+  const safeRate = rate > 0 ? rate : 1
+  if (realDurationSec !== null && realDurationSec > 0 && baseline.length > 0) {
+    return scaleTimeline(baseline, realDurationSec)
+  }
+  const lines = baseline.map((l) => ({ en: l.en, zh: l.zh }))
+  return estimateTimeline(lines, wpm, safeRate)
+}
+
+/** 估算总时长（秒，rate = 1.0 口径；seed 写 `ListeningMaterial.durationSec` 用） */
 export function estimatedDurationSec(lines: Array<{ en: string; zh: string }>, wpm: number): number {
   const tl = estimateTimeline(lines, wpm)
-  return Math.round(tl[tl.length - 1]?.endSec ?? 0)
+  return Math.round(timelineTotalSec(tl))
 }
 
 /** 词数统计 */
