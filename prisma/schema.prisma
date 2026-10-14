@@ -681,7 +681,7 @@ model ListeningMaterial {
   tags        Json?
   /// 预生成三档语速音频：[{"rate":0.75,"url":"..."},{"rate":1.0,"url":"..."},{"rate":1.25,"url":"..."}]
   audioUrls   Json?
-  /// 训练强度阶梯：1=泛听入门 2=CET-4 标准 3=CET-6 强化 4=高阶精听（§5.2）
+  /// 训练强度阶梯：1=泛听入门 2=CET-4 标准 3=CET-6 强化 4=高阶话题（§5.2，架构师裁决改名，避免与 INTENSIVE 精听模式混淆）
   intensityLevel Int @default(1)
   /// 生词/考点：[{word, meaning, startSec, type:'NEW_WORD'|'KEY_WORD'|'PHRASE'|'GRAMMAR'}]
   focusPoints Json?

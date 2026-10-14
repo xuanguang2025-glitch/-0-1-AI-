@@ -5,7 +5,7 @@
  *   1) `scripts/gen-listening-audio.ts` 需要**离线**（不连 DB）枚举全部 60 篇来生成音频；
  *   2) seed 与音频脚本共用同一份内容，杜绝「字幕/音频」两条数据源漂移。
  *
- * 难度阶梯（§5.2）：intensityLevel 1 泛听入门 / 2 CET-4 标准 / 3 CET-6 强化 / 4 高阶精听。
+ * 难度阶梯（§5.2）：intensityLevel 1 泛听入门 / 2 CET-4 标准 / 3 CET-6 强化 / 4 高阶话题（架构师裁决改名）。
  * **共 4 档 60 篇，分布 20 / 15 / 14 / 11（不是均匀的 15×4）**，可用 `countByIntensity()` 复核。
  * ⚠️ 不要为了「凑成 15×4」去改动篇数分布——高档位篇数递减是内容难度设计的自然结果。
  *
@@ -62,7 +62,7 @@ export const INTENSITY_PROFILE: Record<IntensityLevel, { name: string; wpm: numb
   1: { name: '泛听入门', wpm: 100, minSec: 60, maxSec: 90 },
   2: { name: 'CET-4 标准', wpm: 130, minSec: 120, maxSec: 180 },
   3: { name: 'CET-6 强化', wpm: 150, minSec: 180, maxSec: 260 },
-  4: { name: '高阶精听', wpm: 160, minSec: 240, maxSec: 360 },
+  4: { name: '高阶话题', wpm: 160, minSec: 240, maxSec: 360 },
 }
 
 /** 快捷构造：4 行对话/短文 */
@@ -749,7 +749,7 @@ export const LISTENING_P2: ListeningMaterialData[] = [
     blank('Farmers are planting wild ____ to help bees.', 'flowers'),
   ]),
 
-  // ======================= intensity 4 · 高阶精听（news/academic） =======================
+  // ======================= intensity 4 · 高阶话题（news/academic） =======================
   m('lm-50', 'A Lecture on Behavioural Economics', 'news', 'HARD', 'C1', 4, ['academic', 'business'], [
     ['Traditional economics assumes people always act rationally.', '传统经济学假设人总是理性行事。'],
     ['Behavioural economics shows that small nudges can change decisions.', '行为经济学表明，小小的助推就能改变决策。'],
