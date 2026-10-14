@@ -18,8 +18,8 @@ import { useListeningReport } from '@/features/listening/hooks'
 import { ROUTES } from '@/lib/constants/routes'
 
 export default function ListeningReportPage(): React.JSX.Element {
-  const params = useParams<{ id: string }>()
-  const recordId = params.id
+  const params = useParams<{ recordId: string }>()
+  const recordId = params.recordId
   const { data, loading, error, reload } = useListeningReport(recordId)
 
   return (
