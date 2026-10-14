@@ -195,5 +195,5 @@ export const INTENSITY_NAMES: Record<number, string> = {
   1: '泛听入门',
   2: 'CET-4 标准',
   3: 'CET-6 强化',
-  4: '高阶精听',
+  4: '高阶话题',
 }
