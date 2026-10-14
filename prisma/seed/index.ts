@@ -2,9 +2,12 @@
  * Seed orchestrator — run all seeds in dependency order.
  * Idempotent: safe to re-run; each sub-seed upserts by its natural key.
  *
- * Order: roles → admin → vocabulary → content → questions → ai → achievements
+ * Order: roles → admin → vocabulary → content → listening-p2 → questions → ai → achievements
+ * (步骤清单见 ./steps.ts，新增 seed 必须登记到那里，否则不会被执行)
  */
 import { PrismaClient } from '@prisma/client'
+
+import { SEED_STEPS } from './steps'
 import { log, warn } from './shared'
 
 const prisma = new PrismaClient()
@@ -13,24 +16,9 @@ async function main(): Promise<void> {
   const startedAt = Date.now()
   log(`seed start — driver=${process.env.DB_DRIVER ?? 'postgres'}`)
 
-  const { seedRoles } = await import('./seed-roles')
-  const { seedAdmin } = await import('./seed-admin')
-  const { seedVocabulary } = await import('./seed-vocabulary')
-  const { seedContent } = await import('./seed-content')
-  const { seedListeningP2 } = await import('./seed-listening-p2')
-  const { seedQuestions } = await import('./seed-questions')
-  const { seedAi } = await import('./seed-ai')
-  const { seedAchievements } = await import('./seed-achievements')
-
-  await seedRoles()
-  await seedAdmin()
-  await seedVocabulary()
-  await seedContent()
-  // Phase 2 听力 60 篇覆盖 Phase 1 的 20 篇（内容 + 题目 + 音频资产登记）
-  await seedListeningP2()
-  await seedQuestions()
-  await seedAi()
-  await seedAchievements()
+  for (const step of SEED_STEPS) {
+    await step.run()
+  }
 
   // ---- summary counts ----
   const [
