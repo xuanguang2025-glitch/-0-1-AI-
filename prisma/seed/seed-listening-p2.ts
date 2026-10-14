@@ -18,7 +18,7 @@ import path from 'node:path'
 import { prisma } from '@/lib/db'
 import { Prisma } from '@prisma/client'
 
-import { RATES, rateTag, slugify } from '../../scripts/gen-listening-audio'
+import { RATES, durationFromBytes, rateTag, slugify } from '../../scripts/gen-listening-audio'
 import { countWords, estimateTimeline, wpmForIntensity, type TimelineLine } from '@/services/listening/ladder'
 import { LISTENING_P2, type FocusPointKind, type ListeningMaterialData } from './data/listening-p2'
 import { log, warn } from './shared'
@@ -49,8 +49,9 @@ function locateStartSec(phrase: string, timeline: TimelineLine[]): number {
 
 /**
  * 读取已生成音频文件的时长（秒）。
- * 优先用 edge-tts 留下的 `.vtt` 末条 cue（最准）；无 vtt 时按 `材料时长 / 倍速` 估算。
- * 精确时长由 `npm run audio:gen` 落库时覆写。
+ * 优先用 edge-tts 留下的 `.vtt` 末条 cue（最准）；无 vtt 时按**文件字节数**估算
+ * （24kHz/48kbps MP3，与 `gen-listening-audio.durationFromBytes` 同一口径），
+ * 而不是按材料估算时长/倍速——后者只是词数估算值，会把「真实音频」写成估算值。
  */
 function durationForFile(fileAbs: string, materialSec: number, rate: number): number {
   const vtt = fileAbs.replace(/\.mp3$/, '.vtt')
@@ -63,6 +64,10 @@ function durationForFile(fileAbs: string, materialSec: number, rate: number): nu
       if (sec > 0) return Math.round(sec)
     }
   }
+  const bytes = fs.statSync(fileAbs).size
+  const byBytes = durationFromBytes(bytes)
+  if (byBytes > 0) return byBytes
+  // 最后兜底：文件异常小（<1s）时退回估算，至少不为 0
   return Math.max(1, Math.round(materialSec / Math.max(rate, 0.1)))
 }
 

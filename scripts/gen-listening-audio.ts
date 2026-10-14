@@ -13,6 +13,13 @@
  * 幂等：已存在且大小 > 0 的文件跳过（可重复执行、支持 `--only` 增量）。
  * 可选落库：`ListeningAudioAsset` + 回填 `ListeningMaterial.audioUrls`（需 DB；DB 不可用时**明确报错并退出码 2**，不静默降级）。
  *
+ * ⚠️ edge-tts 版本要求（2026-10-14 实测）：**必须 ≥ 7.3.1**。
+ *   7.2.8 及更早版本的 DRM token（Sec-MS-GEC）派生已被微软拒绝，
+ *   表现为 `aiohttp ... WSServerHandshakeError: 403, message='Invalid response status'`
+ *   （连 `--text "probe"` 都复现；`--list-voices` 的 HTTPS 却正常，故易误判为网络问题）。
+ *   升级方式：`pip install --upgrade edge-tts`，或用 `EDGE_TTS_CMD` 指向新版：
+ *     EDGE_TTS_CMD=/path/to/edgeenv/Scripts/edge-tts.exe npm run audio:gen
+ *
  * 用法：
  *   npm run audio:gen                 # 全部 60 篇 × 3 档
  *   npm run audio:gen -- --only=cet4  # 只生成 category=cet4
@@ -115,7 +122,9 @@ function synth(slug: string, rate: Rate, text: string): GeneratedAsset {
   const url = `/audio/listening/${audioFileName(slug, rate)}`
 
   if (fs.existsSync(fileAbs) && fs.statSync(fileAbs).size > 0) {
-    return { slug, rate, fileAbs, url, durationSec: 0, skipped: true }
+    // 已存在：跳过合成，但**仍给出时长**（按字节估算）——否则落库会把这些
+    // 资产的 durationSec 覆写成 1 秒（syncAssetsToDb 的兜底值），毁掉真实时长。
+    return { slug, rate, fileAbs, url, durationSec: durationFromBytes(fs.statSync(fileAbs).size), skipped: true }
   }
 
   const vttPath = path.join(OUT_DIR, `${slug}_${rateTag(rate)}.vtt`)
@@ -128,7 +137,13 @@ function synth(slug: string, rate: Rate, text: string): GeneratedAsset {
   let durationSec = 0
   if (fs.existsSync(vttPath)) {
     durationSec = durationFromVtt(fs.readFileSync(vttPath, 'utf8')) ?? 0
-    fs.rmSync(vttPath, { force: true })
+    // vtt 是**中间产物**，删不掉不该让整个资产落库失败（沙箱的 safe-delete
+    // 护栏曾一次性拦截 23 个删除，导致这些 mp3 生成了却没登记资产）。
+    try {
+      fs.rmSync(vttPath, { force: true })
+    } catch {
+      process.stderr.write(`[audio] warn: cannot remove ${vttPath} (left as-is)\n`)
+    }
   }
   if (durationSec <= 0) durationSec = durationFromBytes(fs.statSync(fileAbs).size)
 
