@@ -37,6 +37,8 @@ export interface AudioPlayerProps {
   rates: ListeningAudioUrl[]
   defaultRate?: number
   className?: string
+  /** 换档回调：页面据此切换到该档的时间基准（R2-9） */
+  onRateChange?: (rate: number) => void
   onTimeUpdate?: (sec: number) => void
   onEnded?: () => void
 }
@@ -49,7 +51,7 @@ function formatTime(sec: number): string {
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer(
-  { src, rates, defaultRate = 1, className, onTimeUpdate, onEnded },
+  { src, rates, defaultRate = 1, className, onRateChange, onTimeUpdate, onEnded },
   ref,
 ) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -106,15 +108,19 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
   }, [emitTime, onEnded])
 
   // 换档：记住播放比例，换 src 后由 onMeta 恢复
-  const applyRate = useCallback((next: number) => {
-    const el = audioRef.current
-    if (el && el.duration > 0) {
-      pendingRatioRef.current = el.currentTime / el.duration
-    }
-    el?.pause()
-    setRateState(next)
-    if (el) el.playbackRate = next
-  }, [])
+  const applyRate = useCallback(
+    (next: number) => {
+      const el = audioRef.current
+      if (el && el.duration > 0) {
+        pendingRatioRef.current = el.currentTime / el.duration
+      }
+      el?.pause()
+      setRateState(next)
+      if (el) el.playbackRate = next
+      onRateChange?.(next)
+    },
+    [onRateChange],
+  )
 
   useImperativeHandle(
     ref,
@@ -161,7 +167,8 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
 
   return (
     <div className={cn('rounded-xl border border-border bg-surface p-3', className)}>
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption -- 字幕由 TranscriptSync 独立渲染，避免双重时间轴 */}
+      {/* 字幕由 TranscriptSync 独立渲染（避免 <track> 与自绘时间轴双轨漂移），
+          故此处不用 <audio> 原生 caption；aria 由 TranscriptSync 的按钮列表承担。 */}
       <audio ref={audioRef} src={activeUrl} preload="metadata" data-testid="listening-audio" />
 
       <div className="flex items-center gap-2">

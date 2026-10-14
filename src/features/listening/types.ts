@@ -43,6 +43,21 @@ export interface ListeningProgress {
   completed: boolean
 }
 
+/**
+ * 某一语速档下的时间基准（R2-9，与服务端 `ListeningTimebaseDto` 对应）。
+ *
+ * 三档音频是三个独立 mp3、时长不同，因此字幕/考点必须**按档给出**；
+ * 前端换档时整套替换，不在客户端做任何时间换算。
+ */
+export interface ListeningTimebase {
+  /** 该档音频总时长（秒）：真实资产时长，或无资产时的估算值 */
+  durationSec: number
+  /** 该档语速下的字幕时间轴 */
+  transcript: TimelineLine[]
+  /** 该档语速下的考点定位（与 transcript 同基准） */
+  focusPoints: ListeningFocusPoint[]
+}
+
 export interface ListeningMaterialListItem {
   id: string
   title: string
@@ -93,9 +108,13 @@ export interface ListeningDetail {
   audioUrl: string
   audioUrls: ListeningAudioUrl[]
   recommendedRate: number
+  /** 兼容字段：推荐档下的字幕时间轴（= timebases[String(recommendedRate)]?.transcript） */
   transcript: TimelineLine[]
   translation: string | null
+  /** 兼容字段：推荐档下的考点定位 */
   focusPoints: ListeningFocusPoint[]
+  /** 按语速档（键为 rate 字符串，如 '0.75' / '1' / '1.25'）的完整时间基准 */
+  timebases: Record<string, ListeningTimebase>
   progress: ListeningProgress | null
   availableModes: ListeningModeKey[]
   questionCount: number
@@ -115,7 +134,10 @@ export interface ListeningQuestionsResult {
   judge: JudgeKind
   available: boolean
   questions: ListeningQuestion[]
+  /** 兼容字段：推荐档下的原文（按句） */
   transcript: TimelineLine[] | null
+  /** 按语速档的完整时间基准（换档时前端整套替换） */
+  timebases: Record<string, ListeningTimebase>
 }
 
 export interface DictationToken {
