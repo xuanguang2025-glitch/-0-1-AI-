@@ -610,3 +610,50 @@ DB 结果：60 行无重复、遗留题目 0 条。两个种子文件头部均�
 **路由：Engineer（Alex）**：① 删除并重生该文件（或给生成器加 `--force` 突破"非空即 skip"的幂等策略）；
 ② README 组件数 10→9；③ E2E 首航超时预算 15s→30-60s（冷编译）；④ （可选）seed-content.ts 源头改后缀 URL。
 修完 ① 即可转 YES，无需再等 QA 全轮。
+
+---
+
+# 第六轮 · 秒验（62507e9 · 截断文件修复 + 3 nit）
+
+> 对象：Engineer 对第六轮唯一保留缺陷（截断文件）的修复 commit `62507e9`（只 commit 未 push）。
+> QA 逐项独立复跑，不采信 commit message。
+
+## ① 截断文件修复 — [PASS]
+
+- 帧级解析：`a-news-report-on-renewable-energy_125.mp3` **24480B/4.08s → 103104B/17.18s**；
+  同篇 075=28.61s / 100=21.48s，**d125/d100 = 0.800 严格符合 1/rate 理论**（0.8），内容完整；
+- 全量 180 档重审计：0 空文件、0 缺失、无一异常；
+- 库内同步：该资产 `durationSec` **4 → 17**；180 资产与磁盘 **0 缺失、0 偏差(>1s)**（逐文件字节估算比对）。
+
+## ② 根因治理（幂等 skip 放过截断）— [PASS，阈值标定独立复算属实]
+
+- 实现：`looksTruncated(actual, words, intensity, rate)` = 实际/估算 < `TRUNCATION_RATIO(0.45)`；
+  skip 前检测命中即删重生；**生成后再复核一次**，仍偏短则抛错不进 results 不落库；`--force` 全量重生；
+  vtt 清理改非致命（try/catch）；skip 分支返回字节估算时长（修掉 durationSec=0 覆写隐患）；
+- **独立标定复算**（QA 自带 MPEG 帧解析器 + 独立 est 公式遍历全部 180 档）：
+  实测 min ratio = **0.588**（其宣称 0.579，测量方法差异）、**p05 = 0.625 与其宣称一致**、中位数 0.930、max 1.434；
+  **0 个样本 < 0.45**（无误杀）、0 个 < 0.579；修复文件 ratio = **1.053**（原 0.245）。
+  阈值 0.45 落在 [0.245, 0.588] 的空档里，**是真标定不是拍的**；
+- 测试 `listening-audio-gen.spec.ts` +7：阈值裕量（0.245<0.45<0.579）、真实截断样本命中（4s/51词/L3/1.25）、
+  同篇 075/100 不误杀、标定集最低正常样本不误杀、words<=0 不判断、estimateSpeechSec 随倍速反向。
+
+## ③ 三个 nit — [PASS]
+
+1. README 组件数 **10 → 9**（与实际 9 个组件一致）；
+2. E2E `FIRST_NAV=45_000`：只用于**进入新路由后的首个断言**（listening 4 / reading 3 / grammar 3 处），
+   页内后续断言保持原值——未全局放宽，不会掩盖真问题；
+3. `seed-content.ts:156` 源头死链：根因比预想更深——原 `update: {}` 意味着**存量行的无后缀 URL 永远不会被修**；
+   现 create/update 均写三档后缀 URL（`audioUrl` 指向 1.0 档 + `audioUrls` 三档），
+   且 `SEED_STEPS` 顺序由 `seed-listening-p2.spec.ts` 断言保护。
+
+## ④ 门禁与 E2E（QA 独立复跑）
+
+- `vitest run`：**266/266（18 文件）**；`tsc --noEmit`：**0 错**；`next lint`：**0 警告**；
+- **E2E 冷启动 2/2 通过**（Playwright 自带全新 dev server，1.1m）——第六轮发现的冷启动 flaky 已被 FIRST_NAV 修复；
+- DB 复查（PG 重启后）：60 材料 **0 条无后缀 audioUrl、60/60 有 audioUrls 三档**。
+
+## 结论
+
+**第六轮唯一保留缺陷已修复且根因已治理，批次 B → YES。**
+三个 nit 全部落地且质量高于要求（尤其 nit2 只提首航断言、nit3 连 update 分支一起修）。
+门禁 266/266 + tsc 0 + lint 0 + E2E 冷启 2/2，均由 QA 独立复跑证实。
