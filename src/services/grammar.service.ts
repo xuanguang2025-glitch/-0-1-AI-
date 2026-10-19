@@ -21,7 +21,7 @@ import { aiService } from './ai/ai.service'
 
 const log = createLogger('grammar.service')
 
-/** 掌握度判定阈值（累计正确率 ≥80 且练习 ≥3 次视为掌握） */
+/** 掌握度判定阈值（题目级累计正确率 ≥80 且累计答题 ≥3 视为掌握） */
 export const MASTERY_THRESHOLD = 80
 export const MASTERY_MIN_ATTEMPTS = 3
 
@@ -464,12 +464,13 @@ export async function submitExercises(
       wrongCount += 1
     }
 
-    // 掌握度：累计正确率（不是单次分数），保证「徽章随练习结果变化」且不会被一次失误打回原形
+    // 掌握度：**题目级**累计正确率（attemptCount/correctCount 都按题计数，
+    // 否则「次数 +1、正确 +N」会让比率溢出），保证徽章随练习结果单调变化。
     const prev = await tx.userGrammarProgress.findUnique({
       where: { userId_topicId: { userId, topicId } },
       select: { attemptCount: true, correctCount: true },
     })
-    const nextAttempts = (prev?.attemptCount ?? 0) + 1
+    const nextAttempts = (prev?.attemptCount ?? 0) + total
     const nextCorrect = (prev?.correctCount ?? 0) + correctCount
     mastery = nextAttempts > 0 ? Math.round((nextCorrect / nextAttempts) * 100) : 0
     attemptCount = nextAttempts
@@ -517,6 +518,7 @@ export async function submitExercises(
     wrongCount,
     mastery,
     mastered: mastery >= MASTERY_THRESHOLD && attemptCount >= MASTERY_MIN_ATTEMPTS,
+    /** 累计作答题数（题目级，不是练习次数） */
     attemptCount,
   }
 }
