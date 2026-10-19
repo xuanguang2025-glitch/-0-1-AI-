@@ -349,6 +349,7 @@ model User {
   listeningRecords   ListeningRecord[]
   listeningProgress  ListeningProgress[]
   readingRecords     ReadingRecord[]
+  grammarProgress    UserGrammarProgress[]
   writingSubmissions WritingSubmission[]
   translationRecords TranslationRecord[]
   learningRecords    LearningRecord[]
@@ -852,6 +853,7 @@ model GrammarTopic {
   parent    GrammarTopic?     @relation("TopicTree", fields: [parentId], references: [id])
   children  GrammarTopic[]    @relation("TopicTree")
   questions GrammarQuestion[]
+  progress  UserGrammarProgress[]
 
   @@index([category, orderIndex])
   @@map("grammar_topics")
@@ -874,6 +876,28 @@ model GrammarQuestion {
 
   @@index([topicId, sortOrder])
   @@map("grammar_questions")
+}
+
+/// 用户语法掌握度（T16 验收 4：徽章随练习结果变化）
+///  mastery = 历史累计正确率（0-100），mastered = 正确率 ≥80 且练习 ≥3 次
+model UserGrammarProgress {
+  id           String    @id @default(cuid())
+  userId       String
+  topicId      String
+  /// 0-100 累计正确率
+  mastery      Int       @default(0)
+  attemptCount Int       @default(0)
+  correctCount Int       @default(0)
+  lastAttemptAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic GrammarTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topicId])
+  @@index([userId, mastery])
+  @@map("user_grammar_progress")
 }
 
 model WritingTask {
