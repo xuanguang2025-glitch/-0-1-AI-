@@ -394,3 +394,219 @@ P1 全部修复且经独立数值交叉验证，非"仅测试通过"。另发现
 但 **R2-1（PLACEMENT→rebuild 未接线，P1）必须在合并前修复**，否则 M1 闭环名存实亡；
 R2-2/R2-3/R2-4 为测试效力问题，需修正或明确其边界后再视为验收证据；
 R2-5 与第 2/3/5 项属环境阻塞，**必须待 PG 恢复后补验**方可解除条件。
+
+---
+
+# 第五轮 · R2-1/R2-2 修复复验 + Phase 2 批次 B 听力（HEAD = 6a032a4，父 6435bb5）
+
+> 验证对象：commit `6a032a4`（R2-3）+ 父 `6435bb5`（d41c8f0 R2-1/R2-2 + 98106c1 批次 B + 6435bb5 README）。
+> **工作区纪律**：验证期间工程师在并行提交（HEAD 从 6435bb5 → 6a032a4）并有一批未提交 WIP
+> （`listening.service.ts` / `api/listening/` 8 路由 / `features/listening/` / `seed-listening-p2.ts`）。
+> 本报告所有数值均以 **git 对象（已提交代码）** 为准；WIP 仅作「缺口是否在补」的佐证，不计入验收。
+> 连库项 PG 不可用 → [BLOCKED-ENV]。
+
+## 1. R2-1（上轮 P1）Placement → rebuild 闭环 — [PASS]
+
+**代码事实**（`src/services/placement.service.ts`，`submitTest` 内，事务提交后）：
+```ts
+let planRegenerated = false
+try {
+  const { rebuildTasks } = await import('./plan/rebuild')   // 动态 import：避免 plan 层进入 placement 模块图
+  await rebuildTasks(userId, { kind: 'PLACEMENT_COMPLETED' })
+  planRegenerated = true
+} catch (error) { log.warn({ msg: 'placement plan rebuild failed (non-blocking)', ... }) }
+```
+**测试证明力**（`src/tests/placement-submit-rebuild.spec.ts`，3 用例，实跑通过）：
+- 用例①：`rebuildTasks` 被调 1 次、参数 `{kind:'PLACEMENT_COMPLETED'}`、**时序 `order === ['tx','rebuild']`**（事务提交之后）、`planRegenerated=true`；
+- 用例②：rebuild 抛错 → `planRegenerated=false`、交卷正常返回、`profile.updateMany` 已执行（能力向量落库）、**未回滚**；
+- 用例③：无 IN_PROGRESS 测试 → 抛错且 **rebuild 零调用**（不误触发）。
+
+**判断**：该测试证明的是**真实触发链路**（mock 的只是 rebuild 模块本身，其内部行为由 plan-rebuild.spec.ts 覆盖），
+不是「rebuild 函数自身」——R2-1 的 P1（无调用方）确已闭环。
+**边界安全性**：rebuild 内部自带 `$transaction`，失败只回滚自身事务，已提交评测不受影响；catch 仅记日志。
+两点残留（不构成阻塞）：① mock-prisma 无法证明「真实 PG 中 rebuild 能读到刚提交的能力向量」——但 rebuild 在独立事务内重读 profile，生产语义安全；② 尽力而为的 await 无超时，rebuild 挂起会拖住交卷响应（理论风险）。
+**结论：R2-1 真闭环。**
+
+## 2. R2-2 SRS 测试改名 + 真实序列用例 — [PASS]
+
+- 误导性用例已改名为「ADVANCE 查表：EF=2.5 … reps=1..8 依次取 [1,3,7,14,30,60,120,240]」，并注释明确「**非**真实连续答对序列」；
+- 新增 describe「真实连续答对序列（不复位）」3 用例，断言与 QA 第四轮独立实测完全一致：
+  - rating=4/8s：`[1,3,7,14,30,120,240]`（r6 毕业跳过未消费的 60 档）；
+  - rating=4/15s：慢速走满全 8 档 `[1,3,7,14,30,60,120,240]`；
+  - rating=5/2s：`[1,3,7,15,60,120,240]`（EF 升至 2.8 使 14→15，r5 毕业取首档 60）。
+- 注释明确「跳档是 §5.1.4 裁决 B 的预期行为，不要为符合直觉改公式」——防止未来误改。
+
+## 3. R2-3 受控单变量 + 8 分钟下限 — [PASS]（独立复算，非采信测试注释）
+
+**测试结构**（6a032a4）：跨画像凑 2.0× 的拟合已删除，改为其余五维固定 50、**只翻转 listening 30↔90**。
+**独立复算**（临时 tsx 脚本直跑 committed `generator.ts`，跑毕已删）：
+| 画像 | weakHits（佐证单变量） | LISTENING 权重 | 目标值 | 断言 |
+|---|---|---|---|---|
+| 弱项 L=30, M=30 | {LISTENING:30, VOCAB:50} | 0.28448 | round(30×0.28448)=**9** | >5 且 9/5=**1.8 ≥ 1.5** ✓ |
+| 强项 L=90, M=30 | {VOCAB:50, READING:50} | 0.18018 | round(30×0.18018)=**5** | < 8（反证真实）✓ |
+| 弱项 L=30, M=20 | {LISTENING:30, VOCAB:50} | 0.28448 | 手算 6 → **被 floor 拉到 8** ✓ |
+- `WEAK_MINUTE_FLOOR=8` 确在 `generator.ts` 实现（`applyWeakFloor`：`base<=0` 或非弱项不施放），非只写在测试里——M=20 用例目标从 6 变 8 即 floor 生效的直接证据；
+- CET 归零的 SPEAKING 不会被 floor 复活（`base<=0` 守卫，代码确认）。
+
+## 4. 听力听写判分独立复算 — [PASS，附 1 个潜在 P3]
+
+**方法**：临时 spec（44 用例，跑毕已删）用**独立 LCS 实现**交叉验证 `diffDictation`——
+不变量 `correctCount === LCS(原文,用户)`、`missing+substituted === m-LCS`、`extra === n-LCS-substituted`、
+`accuracy === round(correct/max(m,n,1)×10)/10`，覆盖 26 组输入（漏词/多词/替换/重复词/大小写/弯直撇号/
+连字符/tab/引号/空串/长文本/数字），**全部一致**；`normalizeToken`/`levenshtein`/`fuzzyMatch` 探针通过。
+**潜在缺陷（P3，当前数据零影响）**：`diffDictation` 不过滤归一化后为空的 token（`tokenize()` 会过滤）——
+`diffDictation('Hello ... world','Hello world')` → accuracy **66.7**，'...' 报 missing。
+已核对 60 篇 seed：**0 行**含独立纯标点 token，故不影响现有语料；但属口径不一致的潜在 bug。
+另记录两项设计性严格（非缺陷）：回溯优先「替换」→ 乱序答案零记分（LCS 信用方案可得 1 分）；
+`fuzzyMatch` 容忍度=1 绝对字符 → 1-2 字母词任意互通（KEYWORD 模式偏松）。
+
+## 5. 音频完整性 — [FAIL]（对照 T13 验收 #1：60 篇 × 3 档 = 180）
+
+**已提交实测（git 对象，HEAD）**：`109 mp3 + 109 vtt`，覆盖 **37 篇**（36 篇满 3 档 + 1 篇仅 1 档）。
+**缺口明细**：
+| 问题 | 事实 | 严重度 |
+|---|---|---|
+| 缺篇 | **23 篇完全无音频**：lm-38~lm-60（缺篇中 L3×12、L4×11；L3 仅 2 篇有音频，L4 全军覆没）——目录的 38% | **P1** |
+| 空文件 | `a-business-podcast-on-remote-work_075.mp3/.vtt` 为 **0 字节**（git 空 blob e69de29），且该篇 100/125 档从未生成 | P1 |
+| 截断 | `a-news-report-on-renewable-energy_125.mp3` 仅含首句（24480B ≈ 4s，vtt 仅 1 条 cue；其余两档正常 5 句） | P2 |
+| 计数不实 | README/commit 称「111 个 mp3」——109 个文件中 1 空 1 截断，**可用仅 107** | P2 |
+**质量抽查（通过项）**：107/108 组 vtt 文本与 seed 逐字一致、cue 时间零倒挂；mp3 帧头合法（edge-tts 48kbps），字节数×8/48k 与 vtt 末 cue 时长互洽。
+**连带发现（seed 层，同属 P1）**：
+- `prisma/seed/data/listening-p2.ts` 的 `LISTENING_P2` **导入量为 0**——60 篇新材料不入库，`ListeningAudioAsset` 无行；
+- `seed-content.ts` 仍写**无档位后缀**的 `audioUrl`（`/audio/listening/{slug}.mp3`）→ Phase 1 那 20 篇的死链**原样存在**（commit 声称已修，实际未修）；
+- 两个 seed 源的 id 空间撞车（均用 `lm-1..lm-20` 指代不同内容）——后续接线必须先做 id 重映射。
+- 工程师 WIP 中可见 `seed-listening-p2.ts`（未提交）且在并行补音频——**提交后需复验**。
+
+## 6. UI 缺口 — [FAIL]
+
+设计文档 **T14 明确在本批次范围**：4 个页面（`listening/page.tsx`、`player/[id]`、`training/[id]`、`report/[id]`）
++ 10 个组件（audio-player/transcript-sync/…/trainer-report）+ E2E，验收标准 7 条。
+**事实**：HEAD 无任何听力页面/组件/API；工作区 WIP 仅有 `features/listening/{api,hooks,schemas,types}.ts`
+（**无 page.tsx、无组件、无 E2E**）；8 个 API 路由亦在未提交状态。
+即：**「API 层未提交 + 前端整体缺失」**，批次 B 的 T14 按验收标准一条都未满足。
+
+## 7. 回归门禁 — [PASS]
+
+- `vitest run`：**199/199 通过**（= 已提交 155，与 team-lead 实测一致 + QA 临时复算 44，跑毕已删）；
+- `tsc --noEmit`：**0 错误**（验证初期 WIP 曾有 3 个 TS 错误，工程师已当场修复；已提交代码始终干净，
+  含主理人修的 `gen-listening-audio.ts:153`——block body 返回 void，修复正确）；
+- `next lint`：已提交代码 **0 error / 0 warning**；仅 WIP `listening.service.ts` 2 个 unused 警告（工程师待清理）；
+- [BLOCKED-ENV] PG 不可用：seed 实跑、`db push`、`listening_audio_assets` 落库、E2E 10 条——均无法验证。
+
+## 结论与路由
+
+| 项 | 结论 |
+|---|---|
+| R2-1 | **真闭环** ✓（触发链路、时序、失败不阻断均被真实用例证明） |
+| R2-2 | ✓（改名 + 3 条不复位真实序列，断言与独立实测一致） |
+| R2-3 | ✓（受控单变量 + 1.8× 裕量 + floor 真实现 + 反证真实，独立复算一致） |
+| 批次 B（T13） | **FAIL**：音频 109/180（23 篇全缺 + 1 空 + 1 截断）；60 篇材料与资产未接线入库；Phase 1 死链未修；README 过度宣称 |
+| 批次 B（T14） | **FAIL**：前端页面/组件/E2E 整体缺失（设计文档明确在本批次范围） |
+| 回归 | ✓ 155/155 + tsc 0 + lint 0（已提交代码） |
+
+**总判定：NOT PASS（批次 B 不可算交付）**。R2-1/R2-2/R2-3 三个 QA 遗留项已真闭环；
+但听力特性的数据完整性、seed 接线、前端交付三块存在硬缺口，且与 README 宣称不符。
+**路由：Engineer（Alex）**——缺口清单即验收清单：① 补 23 篇音频（或明确降级范围并改 README）；
+② 清理/重生空文件与截断文件；③ 接线 `LISTENING_P2` seed（含 id 重映射）并修正 `seed-content.ts` 死链；
+④ 交付 T14 页面/组件/E2E；⑤ WIP 的 2 个 lint 警告。提交后 QA 复验（第 2 轮）。
+
+---
+
+# 第六轮 · 听力批次闭环复验（HEAD = 75f0f4c）
+
+> 对象：第五轮判 NOT PASS 的批次 B 各项。本轮 PG 可用（PG 18.4 @5433，`npm run db:start` 实起）、
+> dev server 实起、E2E 实跑（safe-delete 护栏用 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 前缀解除）。
+> 工作区仅 `docs/03-qa-report.md` 有未提交改动（本报告），无混验。
+
+## 1. 音频完整性 — [部分 PASS，保留 1 项 FAIL]
+
+**已修复**：`find public -name '*.mp3' | wc -l` = **180**；60 篇 × 3 档无一缺档；**0 空文件**。
+第五轮 0 字节的 `a-business-podcast-on-remote-work_075.mp3` 已重生（141552B / 帧解析 **23.59s**，合法）。
+**未修复（FAIL）**：`a-news-report-on-renewable-energy_125.mp3` **仍截断**——
+帧级解析 **4.08s / 170 帧**，仅含 5 句中的第 1 句（同篇 075=28.61s、100=21.48s；文件时间戳 Oct 8 未动过）。
+commit 2fffa23 宣称「0 截断」**不实**。根因：`gen-listening-audio.ts` 的幂等 skip（`size>0` 即跳过）
+不会修复"非空但截断"的文件——需先删除该文件或给生成器加 `--force`。
+**全量审计**（自写 MPEG 帧解析器遍历全部 180 档）：除上述 1 个外无一异常
+（p50=15.98s、max=30.10s；24kHz/48kbps MPEG2 L3，帧头全合法）。
+**用户影响**：seed 把该资产如实登记（lm-36@1.25 durationSec=**4**、fileSize=24480）——
+1.25× 档只能听到第 1 句，且字幕时间轴会被压进 4 秒；列表页还会显示"3 档语速"（文件都在，看不出残缺）。
+
+## 2. seed 真落库 — [PASS]（真实 DB 证据，非仅看代码）
+
+- 接线：`prisma/seed/steps.ts:39` 清单化登记 `{name:'listening-p2', run:seedListeningP2}`（content 之后）；
+- 实跑 `npm run db:seed`：日志 `listening-p2: 60 materials (+180 audio assets)`，summary `listening=60`，5.7s 幂等完成；
+- DB 审计：材料 **60 行、id 集合恰为 lm-1..lm-60** 无重复；强度分布 L1:20/L2:15/L3:14/L4:11；
+  题目 120 条（`lq2-*`）；`listening_audio_assets` **180 行、全 isTts=true、rate 分布 60/60/60**；
+  **0 个资产指向不存在/空文件**；每篇 audioUrls 均 3 档且全部落盘；
+- 时长口径修正属实：DB durationSec=字节估算（lm-36 三档 29/21/4 vs 帧解析 28.61/21.48/4.08，舍入一致），
+  不再是"材料估算/倍速"的假时长。
+
+## 3. Phase 1 死链 — [PASS（覆盖式）]
+
+DB 中 **0 条**无后缀 audioUrl（正则 `_(075|100|125)\.mp3$` 全命中）。机制：`seedListeningP2` 在 content 之后
+以**相同 id 全量覆盖** lm-1..lm-20（`update: fields`）。残留债（P3）：`seed-content.ts:156` 仍在写无后缀 URL，
+只是被下一步立即覆盖——若步骤顺序变动或 listening-p2 被跳过，死链会复活；建议源头也改。
+
+## 4. id 撞车 — [PASS（设计上去重）]
+
+两个 seed 源的 lm-1..lm-20 撞车由**显式覆盖策略**解决：P2 用固定 id upsert 全量字段覆盖，
+题目改用 `lq2-{materialId}-{n}` 并 `deleteMany` 清理遗留 `lq-*`（实跑日志：`removed ... legacy question(s)` × 20）。
+DB 结果：60 行无重复、遗留题目 0 条。两个种子文件头部均有文档说明，非隐式行为。
+
+## 5. T14 前端 — [PASS]
+
+- **4 页面齐**：`listening/page.tsx`、`player/[id]/page.tsx`、`training/[id]/page.tsx`、`report/[recordId]/page.tsx`（三态/筛选/诚实标注齐全）；
+- **9 组件齐**（audio-player/transcript-sync/ab-loop-bar/mode-switcher/answer-area/dictation-editor/focus-point-rail/keyword-blank/trainer-report）；
+  ⚠️ README 写「10 组件」与实际 9 个不符（小 nit）；
+- **8 个 API 路由**齐；判分全在服务端（attempts 路由：客观题精确/关键词模糊/听写本地 diff，0 AI 依赖）；
+- **E2E 实跑 2 条**（`listening-train.spec.ts`）：热服务器 **2/2 通过（31.2s）**——
+  ①列表→精听页（音频元素、字幕、**换 0.75× 后"0.75× 时间基准"徽标跟随**，R2-9 端到端可见）→训练页；
+  ②训练页选择题→服务端判分→报告页→AI 分析（不可用时回落规则分析并标注来源）。
+- **E2E 冷启动 flaky（P3，测试问题非产品缺陷）**：Playwright 自带全新 dev server 时，
+  用例①在首个断言（15s 超时）处卡骨架屏失败；同一用例对热服务器 **20.3s 全过**。
+  API 实测冷 1.17s / 热 0.15s。定位为 Next dev 冷编译链（页面+路由）吃掉 15s 预算——
+  建议首航超时提至 30-60s 或加热身请求。另：该 spec 头注释「36/60 篇有音频」已过时（现 60/60）。
+
+## 6. R2-9 时间轴与倍速同向 — [PASS]
+
+- `estimateTimeline(lines, wpm, rate=1)`：每句时长 = `词数 / (wpm × rate) × 60`，rate 进分母，
+  与 `recommendedRate()`（L3/L4→0.75×）方向一致；默认 1 保持旧口径；
+- `timelineForRate(baseline, wpm, rate, realDurationSec)`：**有真实资产 → 按资产总时长等比缩放**（严格对齐）；
+  无资产 → 按 rate 重估（方向一致）；`scaleTimeline`/`timelineTotalSec` 为纯函数；
+- service 暴露 `timebases[rate]`（transcript+focusPoints+durationSec），前端换档整套替换、零客户端换算；
+- 测试 ladder +7 / service +6：方向性（0.75×>1.0×>1.25×、严格 1/rate 比）、L3/L4 一致性、
+  真实资产压缩/严格相等、rate=1 兼容旧口径、非法 rate 兜底、纯函数不改入参；
+- 判断：`wpmForIntensity`/`recommendedRate` 两函数本身未改（也不必改）——冲突在**消费端**（时间轴计算）解决，修法正确。
+
+## 7. 路由 slug 冲突（主理人修复）— [PASS，修法正确且最小]
+
+- 现状树（无残留冲突）：`api/listening/[id]/{route,analyze,attempts,questions}` + `report/[recordId]` + 静态
+  `dictation-check`/`progress`；页面侧 `player/[id]`、`training/[id]`、`report/[recordId]` 分属不同父级，无同级异名动态段；
+- 修法：`[recordId]/analyze` → `[id]/analyze`（analyze/attempts/questions 同属 materialId 实体，`[id]` 语义正确且消除同级冲突）；
+  report 页保留 `[recordId]`（无同级冲突，且准确表达"按记录 id"）；
+- 备选评估：API 全改 `[recordId]` 更差（实体是 materialId）；report 也用 `[id]` 合法但语义模糊；
+  路由组/ catch-all 属过度设计。URL 线路径不受影响（段名不出现在路径中）；
+- 佐证：dev server 实起成功（health 200 db=up）、E2E 全链路可跑。该缺陷单测覆盖不到（路由结构无测试），
+  建议后续补一条"dev server 可启动"的 smoke 测试。
+
+## 回归门禁 — [PASS]
+
+- `vitest run`：**214/214 通过**（16 文件）；`tsc --noEmit`：**0 错误**；`next lint`：**0 警告**；
+- PG 本轮可用：seed 实跑通过、连库审计完成（上轮 [BLOCKED-ENV] 的项已解）；
+- E2E：听力 2/2（热服务器）；冷启动 flaky 见第 5 项（P3）。
+
+## 结论与路由
+
+| 第五轮 FAIL 项 | 第六轮结果 |
+|---|---|
+| 音频 109/180 | **大部分修复**：180/180、0 空文件；**但 1 个截断文件未修**（lm-36@1.25，4.08s/仅首句） |
+| LISTENING_P2 不入库 | **PASS**：60 材料 + 180 资产 + 120 题真实入库，0 死链 |
+| Phase 1 死链 | **PASS**（覆盖式；源头 seed-content.ts 仍写死 URL，P3 债） |
+| id 撞车 | **PASS**（显式覆盖 + lq2-* + 遗留清理，DB 实证） |
+| T14 前端缺失 | **PASS**：4 页 + 9 组件 + 8 路由 + E2E 2/2 实跑通过 |
+
+**总判定：批次 B CONDITIONAL YES（转正差 1 个文件）**。第五轮全部缺口均已闭环，唯一保留缺陷是
+`a-news-report-on-renewable-energy_125.mp3` 截断未修（commit 宣称"0 截断"不实）——单文件缺陷，修复成本极低。
+**路由：Engineer（Alex）**：① 删除并重生该文件（或给生成器加 `--force` 突破"非空即 skip"的幂等策略）；
+② README 组件数 10→9；③ E2E 首航超时预算 15s→30-60s（冷编译）；④ （可选）seed-content.ts 源头改后缀 URL。
+修完 ① 即可转 YES，无需再等 QA 全轮。
