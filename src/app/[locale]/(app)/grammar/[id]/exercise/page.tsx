@@ -119,7 +119,7 @@ export default function GrammarExercisePage(): React.JSX.Element {
               <span className="ml-auto flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">掌握度</span>
                 <MasteryBadge mastery={result.mastery} mastered={result.mastered} />
-                <span className="text-[10px] text-muted-foreground">累计 {result.attemptCount} 次</span>
+                <span className="text-[10px] text-muted-foreground">累计 {result.attemptCount} 题</span>
               </span>
               <Button
                 type="button"

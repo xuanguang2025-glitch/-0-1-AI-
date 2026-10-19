@@ -69,7 +69,7 @@ export default function GrammarTopicPage(): React.JSX.Element {
       <PageContainer>
         <PageHeader
           title={data.name}
-          description={`${DIFFICULTY_NAMES[data.difficulty] ?? data.difficulty} · ${data.questionCount} 题 · 已练习 ${data.attemptCount} 次`}
+          description={`${DIFFICULTY_NAMES[data.difficulty] ?? data.difficulty} · ${data.questionCount} 题 · 累计作答 ${data.attemptCount} 题`}
           actions={
             <>
               <MasteryBadge mastery={data.mastery} mastered={data.mastered} />
