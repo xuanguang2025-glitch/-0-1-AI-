@@ -298,14 +298,21 @@ async function seedReading(): Promise<number> {
     await prisma.readingArticle.createMany({ data: batch, skipDuplicates: true })
   }
 
-  // 每篇文章 2 道题（主题 + 细节），幂等：固定 id
+  // 每篇文章 2 道题（主题 + 细节），幂等：固定 id + upsert
+  // location 指向答案所在段落（T15 验收 4：点击定位跳转原文并高亮）
   const questions = articles.flatMap((article, index) => {
     const firstBlock = article.contentBlocks[0]
+    const secondBlock = article.contentBlocks[1]
+    const loc = (block: { en: string } | undefined, blockIndex: number) => ({
+      blockIndex,
+      charStart: 0,
+      charEnd: block?.en.length ?? 0,
+    })
     return [
       {
         id: `rq-${index * 2 + 1}`,
         articleId: article.id,
-        type: 'MAIN_IDEA' in {} ? ('SINGLE_CHOICE' as const) : ('SINGLE_CHOICE' as const),
+        type: 'SINGLE_CHOICE' as const,
         stem: `Which statement best summarises the first paragraph of "${article.title}"?`,
         options: [
           firstBlock?.en.slice(0, 60) ?? '',
@@ -316,6 +323,7 @@ async function seedReading(): Promise<number> {
         answer: 'A',
         explanation: '首段主旨即选项 A 的概括。',
         difficulty: article.difficulty,
+        location: loc(firstBlock, 0),
         sortOrder: 0,
       },
       {
@@ -332,12 +340,18 @@ async function seedReading(): Promise<number> {
         answer: 'A',
         explanation: '文章以理由支撑主旨。',
         difficulty: article.difficulty,
+        location: loc(secondBlock ?? firstBlock, secondBlock ? 1 : 0),
         sortOrder: 1,
       },
     ]
   })
-  for (const batch of chunk(questions, 60)) {
-    await prisma.readingQuestion.createMany({ data: batch, skipDuplicates: true })
+  for (const q of questions) {
+    const { id, ...data } = q
+    await prisma.readingQuestion.upsert({
+      where: { id },
+      update: data,
+      create: { id, ...data },
+    })
   }
   log(`reading: ${articles.length} articles (+${questions.length} questions)`)
   return articles.length
