@@ -4,6 +4,8 @@
  */
 import path from 'path'
 
+import { Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/db'
 
 import { chunk, DATA_DIR, log, readCsv, warn } from './shared'
@@ -153,10 +155,22 @@ async function seedListening(): Promise<number> {
       return entry
     })
     const slugSafeTitle = item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    const audioUrl = `/audio/listening/${slugSafeTitle}.mp3`
+    // 三档语速后缀约定（与 scripts/gen-listening-audio.ts / seedListeningP2 一致）：
+    //   audioUrl 指向默认 1.0 档，audioUrls 列出三档。
+    // ⚠️ Phase 1 这 20 篇（lm-1..lm-20）会被随后执行的 `seedListeningP2` 用同 id
+    //    全量覆盖（内容 + 题目 + 音频资产），因此这里的 URL 只是**约定正确**的占位；
+    //    真实音频只对 Phase 2 的标题存在。SEED_STEPS 的顺序（content → listening-p2）
+    //    由 src/tests/seed-listening-p2.spec.ts 断言保护，顺序被改会测试失败。
+    const audioRates = [
+      { rate: 0.75, url: `/audio/listening/${slugSafeTitle}_075.mp3` },
+      { rate: 1, url: `/audio/listening/${slugSafeTitle}_100.mp3` },
+      { rate: 1.25, url: `/audio/listening/${slugSafeTitle}_125.mp3` },
+    ]
+    const audioUrl = audioRates[1]?.url ?? ''
     const material = await prisma.listeningMaterial.upsert({
       where: { id: await resolveListeningId(`lm-${index + 1}`) },
-      update: {},
+      // update 也写这两个字段：否则存量行里的无后缀死链永远不会被修
+      update: { audioUrl, audioUrls: audioRates as unknown as Prisma.InputJsonValue },
       create: {
         id: `lm-${index + 1}`,
         title: item.title,
@@ -165,6 +179,7 @@ async function seedListening(): Promise<number> {
         difficulty: item.difficulty,
         cefrLevel: item.cefr,
         audioUrl,
+        audioUrls: audioRates as unknown as Prisma.InputJsonValue,
         durationSec: Math.round(start),
         transcript,
         sourceName: 'EnglishAI Seed',

@@ -22,10 +22,16 @@
  *
  * 用法：
  *   npm run audio:gen                 # 全部 60 篇 × 3 档
+ *   npm run audio:gen -- --force      # 忽略幂等 skip，全部重生
  *   npm run audio:gen -- --only=cet4  # 只生成 category=cet4
  *   npm run audio:gen -- --only=intensity:3
  *   npm run audio:gen -- --limit=5    # 只处理前 5 篇（调试）
  *   npm run audio:gen -- --no-db      # 只写文件、不落库
+ *
+ * **截断自愈**：幂等 skip 原本只查 `size > 0`，会永久放过「有字节但内容不完整」的文件。
+ * 现按「实际时长 / 词数估算时长 < TRUNCATION_RATIO(0.45)」判定截断并自动重生，
+ * 生成后还会复核一次；阈值标定见 `looksTruncated` 注释（179 正常样本 ratio∈[0.579,1.460]，
+ * 唯一截断样本 0.245）。
  *
  * 环境变量：EDGE_TTS_CMD（默认 edge-tts）、EDGE_TTS_VOICE（默认 en-US-AriaNeural）
  */
@@ -105,6 +111,49 @@ export function durationFromBytes(byteLength: number): number {
   return Math.max(1, Math.round((byteLength * 8) / 48_000))
 }
 
+/** 词数统计（朗读稿口径） */
+export function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+/**
+ * 按「词数 / (wpm × rate)」估算的**合理时长**（秒）。
+ * 用于截断检测的下限，不是精确值——edge-tts 实际语速与设计 wpm 有偏差。
+ */
+export function estimateSpeechSec(words: number, intensityLevel: number, rate: Rate): number {
+  const wpm = intensityLevel === 1 ? 100 : intensityLevel === 2 ? 130 : intensityLevel === 3 ? 150 : 160
+  return Math.max(2, (words / (wpm * rate)) * 60)
+}
+
+/**
+ * 截断判定阈值：实际时长 / 估算时长 低于该值即判「非空但截断」。
+ *
+ * 标定依据（2026-10-14，对全部 180 个已生成文件实测）：
+ *   - 179 个正常文件 ratio ∈ [0.579, 1.460]，p05 = 0.625，中位数 0.914；
+ *   - 唯一的截断文件（lm-36 @1.25，只含 5 句中的第 1 句）ratio = 0.245。
+ * 取 0.45：低于最低正常值 0.579 留足裕量，又能稳定抓住 0.245 这类截断。
+ * 可用 TRUNCATION_RATIO 环境变量覆盖（调试用）。
+ */
+export const TRUNCATION_RATIO = Number(process.env.TRUNCATION_RATIO ?? '0.45')
+
+/**
+ * 判断已存在文件是否「非空但截断」。
+ *
+ * 为什么需要：幂等 skip 只看 `size > 0`，放过了「有字节但内容不完整」的文件
+ * （QA 第六轮实测 lm-36 @1.25 仅 4.08s/170 帧，而同篇 075=28.61s、100=21.48s）。
+ * 不检测的话，这种文件会永远留在仓库里、并把 4s 写进库内 durationSec。
+ */
+export function looksTruncated(
+  actualSec: number,
+  words: number,
+  intensityLevel: number,
+  rate: Rate,
+): boolean {
+  if (words <= 0) return false // 无词数信息时不做判断（避免误杀）
+  const est = estimateSpeechSec(words, intensityLevel, rate)
+  return actualSec / est < TRUNCATION_RATIO
+}
+
 // ---------------------------------------------------------------------------
 // CLI 解析
 // ---------------------------------------------------------------------------
@@ -112,19 +161,35 @@ const argv = process.argv.slice(2)
 const optOnly = argv.find((a) => a.startsWith('--only='))?.split('=')[1]
 const optLimit = Number(argv.find((a) => a.startsWith('--limit='))?.split('=')[1] ?? '0')
 const noDb = argv.includes('--no-db')
+/** --force：忽略幂等 skip，全部重生（截断文件修复用） */
+const optForce = argv.includes('--force')
 
 // ---------------------------------------------------------------------------
 // 生成
 // ---------------------------------------------------------------------------
-function synth(slug: string, rate: Rate, text: string): GeneratedAsset {
+function synth(
+  slug: string,
+  rate: Rate,
+  text: string,
+  opts: { words: number; intensityLevel: number; force: boolean },
+): GeneratedAsset {
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const fileAbs = path.join(OUT_DIR, audioFileName(slug, rate))
   const url = `/audio/listening/${audioFileName(slug, rate)}`
 
   if (fs.existsSync(fileAbs) && fs.statSync(fileAbs).size > 0) {
+    const actualSec = durationFromBytes(fs.statSync(fileAbs).size)
     // 已存在：跳过合成，但**仍给出时长**（按字节估算）——否则落库会把这些
     // 资产的 durationSec 覆写成 1 秒（syncAssetsToDb 的兜底值），毁掉真实时长。
-    return { slug, rate, fileAbs, url, durationSec: durationFromBytes(fs.statSync(fileAbs).size), skipped: true }
+    //
+    // 截断检测：`--force` 或「非空但时长明显偏短」时不跳过，删掉重生。
+    // （幂等 skip 原本只查 size>0，会永久放过截断文件。）
+    if (!opts.force && !looksTruncated(actualSec, opts.words, opts.intensityLevel, rate)) {
+      return { slug, rate, fileAbs, url, durationSec: actualSec, skipped: true }
+    }
+    const reason = opts.force ? '--force' : `truncated(${actualSec}s < ${TRUNCATION_RATIO}×est)`
+    process.stderr.write(`[audio] regenerating ${audioFileName(slug, rate)}: ${reason}\n`)
+    fs.rmSync(fileAbs, { force: true })
   }
 
   const vttPath = path.join(OUT_DIR, `${slug}_${rateTag(rate)}.vtt`)
@@ -146,6 +211,14 @@ function synth(slug: string, rate: Rate, text: string): GeneratedAsset {
     }
   }
   if (durationSec <= 0) durationSec = durationFromBytes(fs.statSync(fileAbs).size)
+
+  // 生成后复核：仍然明显偏短 → 视为失败（不进 results，不落库）
+  if (looksTruncated(durationSec, opts.words, opts.intensityLevel, rate)) {
+    throw new Error(
+      `generated audio looks truncated: ${durationSec}s < ${TRUNCATION_RATIO}×estimate ` +
+        `(words=${opts.words}, intensity=${opts.intensityLevel}, rate=${rate})`,
+    )
+  }
 
   return { slug, rate, fileAbs, url, durationSec: Math.round(durationSec), skipped: false }
 }
@@ -188,12 +261,18 @@ async function main(): Promise<void> {
 
   const results: GeneratedAsset[] = []
   let failures = 0
+  let regenerated = 0
   for (const [idx, mat] of materials.entries()) {
     const slug = slugify(mat.title)
     const text = materialText(mat)
+    const words = countWords(text)
     for (const rate of RATES) {
       try {
-        results.push(synth(slug, rate, text))
+        const before = fs.existsSync(path.join(OUT_DIR, audioFileName(slug, rate)))
+        const asset = synth(slug, rate, text, { words, intensityLevel: mat.intensityLevel, force: optForce })
+        // before && !skipped → 触发了重生（--force 或截断检测）
+        if (before && !asset.skipped) regenerated += 1
+        results.push(asset)
       } catch (e) {
         failures += 1
         process.stderr.write(`[audio] FAIL ${slug} @${rate}: ${e instanceof Error ? e.message : String(e)}\n`)
@@ -204,7 +283,7 @@ async function main(): Promise<void> {
 
   const generated = results.filter((r) => !r.skipped).length
   const skipped = results.filter((r) => r.skipped).length
-  log(`files done: generated=${generated} skipped(existing)=${skipped} failures=${failures}`)
+  log(`files done: generated=${generated} skipped(existing)=${skipped} regenerated=${regenerated} failures=${failures}`)
 
   if (noDb) {
     log('--no-db set → skip DB sync')

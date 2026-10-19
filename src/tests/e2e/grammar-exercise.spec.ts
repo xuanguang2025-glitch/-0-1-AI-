@@ -6,7 +6,7 @@
  * 前置：seed 已导入 14 类语法主题与 56 道题（`npm run db:seed`）。
  */
 import { test, expect } from '@playwright/test'
-import { apiOnboard, loginPage, uniqueEmail } from './helpers'
+import { FIRST_NAV, apiOnboard, loginPage, uniqueEmail } from './helpers'
 
 test.describe('语法学习主链路', () => {
   test('目录 → 主题详情 → 讲解 → 做 5 题 → 提交 → 看到解析', async ({ page }) => {
@@ -16,13 +16,13 @@ test.describe('语法学习主链路', () => {
 
     // ① 目录：14 类主题树
     await page.goto('/grammar')
-    await expect(page.getByTestId('topic-tree')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('topic-tree')).toBeVisible({ timeout: FIRST_NAV })
     const nodes = page.locator('[data-testid="topic-tree"] > li')
     expect(await nodes.count()).toBeGreaterThanOrEqual(14)
 
     // ② 选中第一个主题 → 详情面板（知识点/例句/易错对照）
     await nodes.first().click()
-    await expect(page.getByTestId('topic-detail')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('topic-detail')).toBeVisible({ timeout: FIRST_NAV })
 
     // ③ AI 讲解：Mock 时静态兜底（区块不消失，标注来源）
     await page.getByTestId('topic-explain-0').click()
@@ -35,7 +35,7 @@ test.describe('语法学习主链路', () => {
     await nodes.first().click()
     await page.getByTestId('goto-exercise').click()
     await expect(page).toHaveURL(/\/grammar\/.+\/exercise/, { timeout: 15_000 })
-    await expect(page.getByTestId('exercise-runner')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('exercise-runner')).toBeVisible({ timeout: FIRST_NAV })
 
     // ⑤ 作答（每主题 seed 4 题；每题选 B —— seed 答案不恒定为 B，保证有对有错）
     const groups = page.locator('[data-testid="exercise-runner"] fieldset')

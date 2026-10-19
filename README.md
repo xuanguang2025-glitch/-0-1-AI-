@@ -19,7 +19,7 @@
 | 📈 学习统计 | 预聚合 `daily_learning_stats`，30 天趋势 / 热力日历 / 分模块正确率 | ✅ |
 | 🌗 体验 | Light / Dark / System 主题 · 中英双语 · PC Sidebar / 移动 BottomNav · 首屏 JS 102kB gzip | ✅ |
 | 📚 词库 | 开源 [ECDICT](https://github.com/skywind3000/ECDICT)（MIT）精简导入：CET-4 3000 词 + CET-6 2000 词 | ✅ |
-| 🎧 听力 | 材料 20→60 篇 + Edge TTS 三档语速（180/180 已生成）+ 听写判分（0 依赖 AI）；4 页面 + 10 组件已交付，seed 已落库 | ✅ |
+| 🎧 听力 | 材料 20→60 篇 + Edge TTS 三档语速（180/180 已生成）+ 听写判分（0 依赖 AI）；4 页面 + 9 组件已交付，seed 已落库 | ✅ |
 | 🗣️ 口语 / 📖 阅读 / ✍️ 写作批改 / 🌐 翻译 / 📐 语法 / CET 专区 / 模拟考试 | Phase 2-4 交付 | 🚧 |
 
 > 设计文档：[`docs/01-prd.md`](docs/01-prd.md)（产品需求与 77 页信息架构）· [`docs/02-architecture.md`](docs/02-architecture.md)（技术架构：52 表 / 140 API / 算法约定）· [`docs/04-phase2-design.md`](docs/04-phase2-design.md)（Phase 2 范围与任务分解）· [`docs/03-qa-report.md`](docs/03-qa-report.md)（四轮独立验证记录）

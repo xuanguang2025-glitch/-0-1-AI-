@@ -9,7 +9,7 @@
  * 2026-10-14 实跑通过（2/2，dev + PG 本地）。
  */
 import { test, expect } from '@playwright/test'
-import { apiOnboard, loginPage, uniqueEmail } from './helpers'
+import { FIRST_NAV, apiOnboard, loginPage, uniqueEmail } from './helpers'
 
 test.describe('听力训练主链路', () => {
   test('列表 → 精听页：音频、字幕、换档后时间基准跟随', async ({ page }) => {
@@ -19,7 +19,7 @@ test.describe('听力训练主链路', () => {
 
     // ① 列表：seed 60 篇必然非空；带「AI 合成语音」诚实标注
     await page.goto('/listening')
-    await expect(page.getByTestId('listening-list')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('listening-list')).toBeVisible({ timeout: FIRST_NAV })
     await expect(page.getByText('AI 合成语音（Phase 2）').first()).toBeVisible()
     const cards = page.locator('[data-testid="listening-list"] > div')
     expect(await cards.count()).toBeGreaterThan(0)
@@ -30,7 +30,7 @@ test.describe('听力训练主链路', () => {
 
     // 音频元素与字幕（首篇为 L1，seed 保证有字幕）
     await expect(page.getByTestId('listening-audio')).toBeAttached()
-    await expect(page.getByTestId('transcript-line-0')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('transcript-line-0')).toBeVisible({ timeout: FIRST_NAV })
     await expect(page.getByText('1× 时间基准')).toBeVisible()
 
     // ③ 点击字幕 → seek（时间显示不再是 0:00 之前的初始态）
@@ -51,7 +51,7 @@ test.describe('听力训练主链路', () => {
     await loginPage(page, email)
 
     await page.goto('/listening')
-    await expect(page.getByTestId('listening-list')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('listening-list')).toBeVisible({ timeout: FIRST_NAV })
     const cards = page.locator('[data-testid="listening-list"] > div')
     await cards.first().getByRole('link', { name: '训练' }).click()
     await expect(page).toHaveURL(/\/listening\/training\/.+/, { timeout: 15_000 })
@@ -63,7 +63,7 @@ test.describe('听力训练主链路', () => {
 
     // 作答：选第一个选项（题目由 seed 保证存在）
     const firstOption = page.locator('input[type="radio"]').first()
-    await expect(firstOption).toBeVisible({ timeout: 15_000 })
+    await expect(firstOption).toBeVisible({ timeout: FIRST_NAV })
     await firstOption.check()
 
     // 提交 → 跳报告页（L4 判分在服务端）

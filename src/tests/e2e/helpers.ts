@@ -9,6 +9,16 @@ import { expect } from '@playwright/test'
 
 export const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 
+/**
+ * 首航/新路由首个断言的超时。
+ *
+ * Next dev 下每个路由**首次**被访问都要现场编译（冷编译链可吃掉 10-20s），
+ * Playwright 自带新 dev server 时 15s 预算经常不够 → 假红（QA 第六轮实测：
+ * 同一用例热服务器 20.3s 全过、冷服务器卡在首个 15s 断言）。
+ * 页面内的后续断言保持默认 5s / 15s 即可。
+ */
+export const FIRST_NAV = 45_000
+
 /** 每次 run 唯一的测试邮箱，避免唯一约束冲突 */
 export function uniqueEmail(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e4)}@e2e.test`

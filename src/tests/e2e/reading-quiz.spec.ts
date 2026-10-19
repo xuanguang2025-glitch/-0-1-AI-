@@ -7,7 +7,7 @@
  *       从而确定性断言「错题本 +N」。
  */
 import { test, expect } from '@playwright/test'
-import { apiOnboard, loginPage, uniqueEmail } from './helpers'
+import { FIRST_NAV, apiOnboard, loginPage, uniqueEmail } from './helpers'
 
 test.describe('阅读训练主链路', () => {
   test('打开文章 → 断点续读 → 划词直查 → 做 quiz → 提交 → 报告可见', async ({ page }) => {
@@ -17,14 +17,14 @@ test.describe('阅读训练主链路', () => {
 
     // ① 列表（seed 60 篇必然非空）
     await page.goto('/reading')
-    await expect(page.getByTestId('reading-list')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('reading-list')).toBeVisible({ timeout: FIRST_NAV })
     const cards = page.locator('[data-testid="reading-list"] > div')
     expect(await cards.count()).toBeGreaterThan(0)
 
     // ② 进入文章详情
     await cards.first().getByRole('link', { name: /开始阅读|继续阅读/ }).click()
     await expect(page).toHaveURL(/\/reading\/.+/, { timeout: 15_000 })
-    await expect(page.getByTestId('article-body')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('article-body')).toBeVisible({ timeout: FIRST_NAV })
     await expect(page.getByTestId('article-block-0')).toBeVisible()
 
     // ③ 断点续读：滚动后进度被记录（防抖 2s）
@@ -73,7 +73,7 @@ test.describe('阅读训练主链路', () => {
     await loginPage(page, email)
 
     await page.goto('/reading')
-    await expect(page.getByTestId('reading-list')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('reading-list')).toBeVisible({ timeout: FIRST_NAV })
 
     // ① 难度筛选（独立验证：不与搜索叠加，避免组合过滤后为空）
     await page.getByRole('button', { name: '入门' }).click()

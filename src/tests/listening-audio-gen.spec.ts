@@ -9,9 +9,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   RATES,
+  TRUNCATION_RATIO,
   audioFileName,
+  countWords,
   durationFromBytes,
   durationFromVtt,
+  estimateSpeechSec,
+  looksTruncated,
   materialText,
   rateFlag,
   rateTag,
@@ -73,5 +77,54 @@ describe('时长推导', () => {
     expect(durationFromBytes(60_000)).toBe(10)
     expect(durationFromBytes(0)).toBe(1)
     expect(durationFromBytes(100)).toBe(1)
+  })
+})
+
+/**
+ * 截断自愈（QA 第六轮 P1：lm-36 @1.25 仅 4.08s/170 帧，幂等 skip 永久放过它）。
+ * 阈值标定：179 个正常文件 ratio ∈ [0.579, 1.460]（p05=0.625），唯一截断样本 0.245。
+ */
+describe('截断检测 looksTruncated（QA 第六轮转正条件）', () => {
+  it('阈值本身有裕量：低于最低正常样本 0.579，高于截断样本 0.245', () => {
+    expect(TRUNCATION_RATIO).toBeGreaterThan(0.245)
+    expect(TRUNCATION_RATIO).toBeLessThan(0.579)
+  })
+
+  it('estimateSpeechSec 随倍速反向变化（0.75× 比 1.25× 长）', () => {
+    const slow = estimateSpeechSec(50, 3, 0.75)
+    const normal = estimateSpeechSec(50, 3, 1)
+    const fast = estimateSpeechSec(50, 3, 1.25)
+    expect(slow).toBeGreaterThan(normal)
+    expect(normal).toBeGreaterThan(fast)
+    // 50 词 @wpm150 → 1.0× 20s
+    expect(normal).toBeCloseTo(20, 5)
+  })
+
+  it('抓住真实截断样本：lm-36 @1.25（51 词，实测仅 4s）', () => {
+    expect(looksTruncated(4, 51, 3, 1.25)).toBe(true)
+  })
+
+  it('不误杀正常样本：同篇 075=29s / 100=21s 均判为正常', () => {
+    expect(looksTruncated(29, 51, 3, 0.75)).toBe(false)
+    expect(looksTruncated(21, 51, 3, 1)).toBe(false)
+  })
+
+  it('不误杀标定集里的最低正常样本（ratio 0.579）', () => {
+    // lm-17：36 词 L? → est(0.75)≈28.8s，实测 17s → ratio 0.59
+    expect(looksTruncated(17, 36, 1, 0.75)).toBe(false)
+  })
+
+  it('words<=0（无词数信息）时不做判断，避免误杀', () => {
+    expect(looksTruncated(1, 0, 3, 1.25)).toBe(false)
+  })
+
+  it('countWords 与朗读稿口径一致', () => {
+    expect(countWords('  Hello   world  ')).toBe(2)
+    expect(countWords('')).toBe(0)
+    expect(countWords(materialText({
+      id: 'x', title: 'x', category: 'daily', difficulty: 'EASY', cefr: 'A2',
+      intensityLevel: 1, tags: [], focusPoints: [], questions: [],
+      lines: [{ en: 'One two', zh: '' }, { en: 'Three', zh: '' }],
+    }))).toBe(3)
   })
 })
