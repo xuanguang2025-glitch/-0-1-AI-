@@ -5,8 +5,8 @@
  *       → 报告页（L5）。
  *
  * 前置：seed 已导入 60 篇听力材料（`npm run db:seed`）。
- * 说明：本机 3000 端口被占用时实跑受阻，标 [BLOCKED-ENV]；逻辑本身不依赖音频文件
- *       （36/60 篇有 TTS 音频，无音频的材料页面会给出明确提示而非白屏）。
+ * 说明：36/60 篇有 TTS 音频，无音频的材料页面会给出明确提示而非白屏。
+ * 2026-10-14 实跑通过（2/2，dev + PG 本地）。
  */
 import { test, expect } from '@playwright/test'
 import { apiOnboard, loginPage, uniqueEmail } from './helpers'
