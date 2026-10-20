@@ -1240,6 +1240,18 @@ model WritingSubmission {
   aiSummary      String?
   /// 规则引擎基础检查结果（降级时使用）
   ruleCheck      Json?
+  /// 规则引擎总分 0-100（**保存即算，不调 AI**，与 aiTotalScore 分离）
+  ruleCheckScore Int?
+  /// 规则引擎问题明细 [{rule, message, deduction, excerpt}]
+  ruleCheckDetail Json?
+  /// 报告分数来源：rule = 规则引擎（AI 不可用）；ai = AI 六维评分
+  scoreSource    String          @default("rule")
+  /// 任务字数要求快照 {min, max}，用于「字数不足/超出」提示
+  requiredWords  Json?
+  /// 已生成的改写档（避免重复请求同一档）
+  rewriteStyles  Json?
+  /// 修订轮次：每次 AI 批改后 +1
+  revision       Int             @default(0)
   aiDegraded     Boolean          @default(false)
   tokensUsed     Int              @default(0)
   submittedAt    DateTime?
