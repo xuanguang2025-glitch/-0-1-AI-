@@ -757,3 +757,111 @@ DB 结果：60 行无重复、遗留题目 0 条。两个种子文件头部均�
 - 两处设计偏差（explain 流式、quizResult 覆盖口径）均不构成功能缺陷，记录在案。
 - [ENV] 备注：首轮 E2E 因 chromium 二进制缺失全挂（`npx playwright install chromium` 后排除），
   建议在 README/CI 说明中补充该前置条件。
+
+---
+
+# 第八轮 · 批次 D（T17 写作 + T18 翻译 + 错题本闭环）
+
+> 对象：commit `9f14833..9a5549e` 共 8 个（T17 写作 4 + T18 翻译 2 + 错题本 1 + E2E 1）。
+> 全程独立复算 + 真实 API/DB 验证 + 竞态构造测试；不采信 commit message。
+
+## ① 规则引擎扣分独立复算 — [PASS]
+
+用精确构造的文章（132 词、2 段、1 句 27 词、恰 2 被动、0 连接词、恰 2 拼写错）直跑 committed 实现：
+- 各类扣分：spelling −10、sentenceLength −5、connectors −10、paragraphs −10、passiveVoice −6
+  → **总分 59，与手算 100−10−5−10−6−10=59 完全一致**（构造统计先行自证：wordCount=132、
+  paragraphCount=2、longSentences=1、passiveCount=2、connectorCount=0、spellingErrors 恰 2 个）；
+- **被动上限**：5 处被动 → deduction **12**（非 15）；4 处 → 12（恰触上限）；3 处 → 9；
+- 拼写检查含屈折容忍（es|s|ed|ing|ly 去缀复查）、去重、白名单；`passed` 线 = ≥60 且无拼写错。
+
+## ② T17 E2E 重写真实性 — [PASS]
+
+- 旧 `writing-analyze.spec.ts` 确在 `3f1f4c2` 删除（`--diff-filter=D` 实证）；仅存 `writing-analyze-real.spec.ts`；
+- 新 spec 走**全 UI 链路**：任务列表 → 开始写作（创建占位稿）→ 编辑器输入 → 自动保存 → 请求批改 →
+  报告页 `score-source-badge`（`/规则评分|AI 评分/`）→ 列表徽章——无任何对 `/api/ai/diagnosis` 的直接调用。
+
+## ③ 双轨降级与 scoreSource — [PASS]
+
+- `analyzeSubmission`：AI 轨成立条件 = `!degraded && data 非空 && (total>0 || 有维度分)`——
+  **零分罐头对象绝不当真实 AI 分写库**（注释明示 + 代码守卫）；degraded 时 `scoreSource='rule'`、
+  AI 字段清库（DbNull）；双轨都落 `ruleCheck` 结果，报告页永远有规则分兜底（页面不空白）；
+- E2E 断言徽章文本自适应两轨 + `report-rule-issues` 两轨都渲染。
+
+## ④ 规则检查同步性 — [PASS（服务端）/ **[FAIL]（前端面板，见 ⑩）**]
+
+- **服务端同步 ✓**：`createSubmission` 与 `updateSubmission`（自动保存后端）每次都重跑 `runRuleCheck`
+  并落库 `ruleCheck/ruleCheckScore/ruleCheckDetail`——纯函数 + 词典缓存，**0 AI**；
+- **前端"边写边出提示"实际不实时 [FAIL]**：内联面板显示创建时快照，输入后不更新——详见下文「发现的问题」。
+
+## ⑤ 自动保存 — [PASS]
+
+- 防抖 **2500ms**（`useDebouncedCallback(..., 2500)`）；保存期间新输入写入 `pendingRef`，
+  完成后 `if (pendingRef.current !== null) void flush()` **立即续排**（不丢最后一次输入）；
+- **「请求批改」前先 flush**：`page.tsx:75` `await flush()` 再 `analyze`——批改的必是最新稿。
+
+## ⑥ T18 翻译 — [PASS]
+
+- 500 字符上限：`MAX_SOURCE_LEN=500`，超限抛 VALIDATION_ERROR（带当前长度提示）；
+- Mock 缺档：Mock 返回字符串 → 仅 literal 有值，其余 4 档 null → 前端显示"AI 暂不可用"（实测
+  `availableStyles=["literal"]`、degraded=false；E2E 断言不白屏）；
+- **收藏幂等 + 生词抽取**：`favorite.upsert`（`@@unique([userId,targetType,targetId])`，update:{}）——
+  **同记录收藏 2 次 favorites 仍 1 行**（真实 DB 实测）；抽取 "economy"（≥4 字母、非停用词、词典命中）
+  成功入 `user_vocabulary`；
+- **历史 50 条 = 创建时物理裁剪**（非查询 limit）：QA 自建账号直插 **55 条** + 翻译 1 次 →
+  **总数 50**（`pruneHistory` 按 createdAt desc 保 50、deleteMany 其余，实测物理删除）。
+
+## ⑦ 错题本闭环 — [PASS]
+
+- 读取侧 `listWrongQuestions`（来源筛选 + 未掌握计数 + 分页）+ `markMastered`/`reopenQuestion`；
+- **master 幂等保留首次时间**：`masteredAt = row.masteredAt ?? new Date()`——重复标记不刷新时间；
+  reopen 置 null 且 errorCount 不动（历史保留）；
+- 页面 + E2E 链路（做错阅读题 → 错题本可见 → 标记 → 筛选切换）实跑通过。
+
+## ⑧ 单一写入口原则 — [PASS]
+
+全库 grep `wrongQuestion.{create,update,delete,upsert}`：写操作**仅**出现在
+`grammar.service.ts`（错题写入）、`reading.service.ts`（错题写入）、`wrong-questions.service.ts`
+（master/reopen 状态迁移）——**错题本服务无 create，只读聚合 + 复习状态**，无双写入口。
+
+## ⑨⑩ 两个客户端 bug 修复 — ⑨ [PASS] / ⑩ [PASS]
+
+**⑨ `useTranslationHistory` reload no-op**：`nonce` state 进入 effect 依赖 `[page, favoriteOnly, nonce]`，
+reload 强制 `setNonce` 触发 refetch——page 已是 1 时不再是 no-op。E2E 翻译链路实测历史刷新。
+
+**⑩ `useWrongQuestions` 旧闭包竞态**：`seqRef` 请求序号 + `paramsRef` 永远读最新参数；
+响应仅当 `seq === seqRef.current` 才写 state。**QA 构造真实竞态验证**（临时 spec，跑毕已删）：
+路由拦截给无筛选请求加 3.5s 延迟充当"晚到的过期响应 A"，master 后立即切「已掌握」筛选（B 先回）——
+**A 返回后 mastered 视图未被覆盖**（守卫生效，测试通过）。
+
+## ⑪ 门禁与 E2E — [PASS]
+
+- `vitest run`：**323/323**（比预期 322 多 1，系工程师计数后又有微增；全绿）；
+- `tsc --noEmit` **0 错**；`next lint` **0 警告**；
+- **E2E 全量 19/19 通过**（冷启动 Playwright 自带 dev server，4.8m）。
+
+## 发现的问题
+
+### P2 · 内联规则检查面板是"死"的（验收 3"边写边出提示"不成立）
+
+**实证**（临时探针 spec，跑毕已删）：
+- 新建占位稿（'Draft started. Replace this with your essay.' 8 词）→ 面板 rule-score = **70**；
+- 输入 95 词合规作文 → 自动保存完成（autosave-saved 可见）→ 等 2s → 面板**仍 = 70**；
+- 同刻直查详情 API：**服务端 ruleCheckScore = 80**（已随新内容重算）——服务端对、面板错。
+
+**根因**：面板数据源 `data?.ruleCheck` 来自 `useWritingDetail`（deps `[id]`，仅加载一次）；
+自动保存只更新 `savedAt`，**从不 reload 详情**，也无本地 state 合并——面板永远停在创建时快照。
+
+**影响**：用户边写边看到的规则分/问题清单是**旧稿的**，误导明显（显示 70 分+占位稿的问题，
+实际内容已是另一篇文章的检查结果）；报告页/批改用的是服务端新值，故数据本身无损坏。
+
+**为什么 E2E 没抓到**：`writing-analyze-real.spec.ts:39` 只断言 `inline-check-panel` **可见**——
+占位稿创建时面板就有值（可见性恒真），断言空转。典型的"测试绿但行为不符设计"。
+
+**建议修法**：自动保存成功后 `reload()` 详情（或让 autosave 响应携带完整 ruleCheck 并本地合并）；
+E2E 补一条「面板分数随输入变化」的断言（先读初值 → 输入 → 断言分数改变）。
+
+## 结论
+
+**批次 D → CONDITIONAL YES**：核心逻辑（规则引擎扣分、双轨降级、裁剪、幂等、竞态守卫、单一写入口）
+全部独立复算通过且质量高；唯一实质缺陷是**内联面板不实时**（P2，纯前端展示层、数据无损坏、修复成本低）。
+修掉面板刷新 + 补一条防回归断言即可转 YES，无需全轮重验（QA 只复验该点）。
