@@ -887,3 +887,21 @@ E2E 补一条「面板分数随输入变化」的断言（先读初值 → 输�
 **批次 D → CONDITIONAL YES，唯一遗留 = P2（内联规则面板不实时，见上文）**。
 R2-10 补验通过后，T17 全部 8 项验收中 7 项 PASS、1 项（验收 3）受 P2 影响；
 T18 4 项全 PASS；错题本闭环 PASS。Alex 修复内联面板刷新 + 补防回归断言后，QA 单点复验即可转 YES。
+
+## P2 修复复验（commit `739b680`）— [PASS] → 批次 D 转 YES
+
+- **修法**：采用 QA 建议的方案 B（autosave 响应携带完整 ruleCheck，前端本地合并，零额外请求）——
+  `updateSubmission` 返回体加 ruleCheck（函数内本就有）、hooks 暴露最新 ruleCheck、
+  编辑器页 `savedRuleCheck ?? data.ruleCheck`（最新保存优先）；
+- **同款探针复验**（第八轮抓 bug 的原探针）：初始 rule-score = **70** → 输入合规作文自动保存后面板 = **80**
+  （分数已变化）；且**面板分数与服务端 ruleCheckScore 逐字一致（80=80）**——断链已接通；
+- **防回归断言在位**：`writing-analyze-real.spec.ts:40,48` 先读初值、autosave 后
+  `not.toHaveText(initialScore)`——旧"只验可见"的空转断言已补实；服务层单测同步断言响应携带完整 ruleCheck；
+- **门禁**：vitest **323/323（21 文件）**、tsc **0 错**、lint **0 警告**（工程师自跑 + QA 复跑一致）。
+
+## 批次 D 终版结论：**YES（可交付）**
+
+八项验收全部满足：规则引擎扣分（手算吻合）· 双轨降级（R2-10 后 Mock 恒 rule 轨）·
+规则检查同步（服务端 + 内联面板全链路实时）· 自动保存（防抖/续排/flush）·
+字数不足提示 · E2E 真链路 · scoreSource 徽章 · 防回归断言。
+T18 翻译四项 + 错题本闭环此前已 PASS。QA 无未决事项。
