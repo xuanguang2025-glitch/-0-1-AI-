@@ -168,8 +168,11 @@ npm install --legacy-peer-deps
 ## 🧪 测试
 
 ```bash
-npm run test        # Vitest 单测（214 个用例：SRS / CEFR / 学习计划生成 / 听力判分与阶梯 / seed 接线 / 限流 / 时区 / Mock AI）
-npx playwright test # E2E（注册→测评→看板→学词→听力训练 9 条链路）
+# E2E 首次运行前需安装浏览器二进制（缺失时会快速失败：浏览器启动即报错）
+npx playwright install chromium
+
+npm run test        # Vitest 单测（300 个用例：SRS / CEFR / 学习计划 / 听力判分与阶梯 / seed 接线 / 写作规则引擎 / 阅读判分 / 语法掌握度 / 限流 / 时区 / Mock AI）
+npx playwright test # E2E 15 条（注册→测评→看板→学词→听力→阅读 quiz→语法练习→写作等链路）
 ```
 
 ---
