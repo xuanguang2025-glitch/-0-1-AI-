@@ -112,6 +112,9 @@ enum ExamSection {
   READING
   WRITING
   TRANSLATION
+  /// 专项训练卷（Phase 2 T20）：语法 / 词汇专项
+  GRAMMAR
+  VOCAB
 }
 
 enum AttemptStatus {
@@ -1123,6 +1126,18 @@ model SpeakingSession {
   messageCount   Int            @default(0)
   /// AI 完整对话文本（评分输入）
   fullTranscript String?
+  /// 音频保留策略：none | session | permanent（Phase 2 默认 none，不留存音频）
+  audioRetention String         @default("none")
+  /// 语音转写来源：web_speech | cloud_asr | manual（Phase 3 接口预留，§6.2）
+  sttProvider    String         @default("web_speech")
+  /// STT 平均置信度 0-1（Chrome 桌面常为 0/null，仅记录不参与评分）
+  sttConfidence  Float?
+  /// 本会话是否以文本输入为主（浏览器不支持 SpeechRecognition 时的降级，验收 5）
+  wasTextInput   Boolean        @default(false)
+  /// 报告分数来源：rule = 规则评分（S6）；ai = AI 评分
+  scoreSource    String         @default("rule")
+  /// {wpm, fillerCount, avgSentenceLen, coverage, score}（S6 真实计算，非空壳）
+  ruleStats      Json?
   /// {pronunciation, grammar, vocabulary, fluency, naturalness, total}
   aiScores       Json?
   aiTotalScore   Int?
@@ -1139,6 +1154,42 @@ model SpeakingSession {
 
   @@index([userId, status, startedAt])
   @@map("speaking_sessions")
+}
+
+/// 口语练习角色（11 个，seed-speaking-p2）——persona 直接拼入 TUTOR_CHAT system 侧上下文
+model SpeakingRole {
+  id          String        @id @default(cuid())
+  roleKey     String        @unique
+  name        String
+  /// persona Prompt 片段（角色性格/语气/语言水平）
+  persona     String
+  description String?
+  difficulty  Difficulty    @default(MEDIUM)
+  sortOrder   Int           @default(0)
+  status      PublishStatus @default(PUBLISHED)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("speaking_roles")
+}
+
+/// 口语练习场景（9 个）——setting 描述环境；targetWords 为 S6 覆盖度目标句
+model SpeakingScene {
+  id          String        @id @default(cuid())
+  sceneKey    String        @unique
+  name        String
+  /// setting Prompt 片段（场景环境/对话目标）
+  setting     String
+  description String?
+  /// 场景关键表达（S6 目标句覆盖度用）
+  targetWords Json?
+  difficulty  Difficulty    @default(MEDIUM)
+  sortOrder   Int           @default(0)
+  status      PublishStatus @default(PUBLISHED)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("speaking_scenes")
 }
 
 model SpeakingMessage {

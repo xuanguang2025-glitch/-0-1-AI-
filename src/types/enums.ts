@@ -177,17 +177,22 @@ export const QUESTION_TYPE_VALUES = [
 
 export const questionTypeSchema = z.enum(QUESTION_TYPE_VALUES)
 
+/** 专项训练卷（Phase 2 T20）：语法 / 词汇专项 */
 export type ExamSection =
   | 'LISTENING'
   | 'READING'
   | 'WRITING'
   | 'TRANSLATION'
+  | 'GRAMMAR'
+  | 'VOCAB'
 
 export const EXAM_SECTION_VALUES = [
   'LISTENING',
   'READING',
   'WRITING',
   'TRANSLATION',
+  'GRAMMAR',
+  'VOCAB',
 ] as const
 
 export const examSectionSchema = z.enum(EXAM_SECTION_VALUES)
