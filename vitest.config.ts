@@ -39,12 +39,16 @@ export default defineConfig({
         'src/services/placement/scoring.ts',
         'src/lib/utils/date.ts',
         'src/lib/auth/rate-limit.ts',
+        // Phase 2 核心算法（T17 写作规则引擎 / T19 口语规则评分）
+        'src/services/writing/rule-engine.ts',
+        'src/services/speaking/rule-score.ts',
       ],
+      // T20 验收 7：核心算法覆盖率 ≥95%（门禁真实生效，非摆设）
       thresholds: {
-        lines: 80,
-        functions: 80,
-        statements: 80,
-        branches: 70,
+        lines: 95,
+        functions: 95,
+        statements: 95,
+        branches: 90,
       },
     },
   },
