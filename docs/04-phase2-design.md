@@ -797,11 +797,41 @@ export function ruleScore(i: RuleScoreInput): RuleScoreOutput {
   1. **现有 `writing-analyze.spec.ts` 必须重写**——它当前打的是 `/api/ai/diagnosis`，**不算写作批改覆盖**（QA 核对发现）。新版必须真实走 `POST /api/writing/:id/analyze`
   2. 规则引擎单测：拼写错误、句长超限、无连接词、被动语态各至少 1 个用例，**断言具体扣分值**
   3. 编辑器**边写边出规则提示**（保存即返回 `ruleCheck`，不调 AI，延迟 < 200ms）
-  4. AI Mock 时报告页显示 `scoreSource='rule'` 徽章 + 规则检查结果，**页面不空白**
+  4. **AI Mock 时报告页显示 `scoreSource='rule'` 徽章 + 规则检查结果，页面不空白**（⚠️ **R2-10 裁决**：当前实现偏差——mock provider 对 `WRITING_REVIEW` 返回合法罐头分 `totalScore=9` 且 `degraded=false`，导致服务走 AI 轨、显示绿色「AI 评分 9」。**已裁决恢复本条的规则轨语义**，见下方 R2-10 块与工程师规格）
   5. AI 可用时显示 6 维评分 + corrections + rewrites（4 档改写）
   6. 自动保存防抖 ≤3s，刷新不丢稿
   7. 字数不足/超出时明确提示（`requiredWords`）
   8. E2E：新建作文 → 输入 150 词 → 触发批改 → 报告页可见 `scoreSource` 徽章
+
+> **★ R2-10 裁决（写作 Mock 语义冲突 · 方案 2：Mock 回落规则轨）**
+>
+> **现象**：`src/services/ai/providers/mock.ts:39-47` 对 `WRITING_REVIEW` 返回**合法罐头数据**（`totalScore=9` + 四维分 3/3/2/1 + `overallComment`「（Mock 兜底）…」），gateway 判定 `degraded=false` → `writing.service.ts:599` 守卫（`total>0 || dims!==null`）通过 → `scoreSource='ai'`。**Mock 模式下用户看到绿色「AI 评分 9」**——但这是**罐头分**：任何文章都恰好得 9/15。
+>
+> **裁决：方案 2。** 理由（学习科学 + 产品）：
+> 1. **恒定分数是非偶然反馈（non-contingent feedback）**：好文章得 9、差文章也得 9——反馈与努力完全脱钩。这比没有反馈**更有害**：它教会用户「写什么分数都一样」，直接破坏自我效能（Bandura：动机来自可感知的进步，而非不变的奖励）。
+> 2. **规则分才是真实反馈**：拼写错误是**从用户自己的文本里找出来的**、句长/连接词/分段都是针对本人文章的具体诊断——这正是本项目 §8.3「降级策略：优先真实计算的兜底」的既定原则。
+> 3. **UI 信号自相矛盾**：绿色「AI 评分」徽章 vs `overallComment` 开头的「（Mock 兜底）」，用户无从判断信哪个。且 `report-header.tsx:30` 裸数字显示 `9`、**无 `/15` 量纲**，易被误读为 9/100（灾难分）。实际 9/15=60% 是及格分——两个方向的误读都存在。
+> 4. **方案 3（双徽章）已被本文档 §8 风险 #7 明确排除**（「不并列展示两个分数」），且不解决「分数恒定」的根因。
+> 5. **方案 1（维持现状）否决**：「（Mock 兜底）」标注在 comment 里，但徽章说「AI 评分」——自相矛盾的标注等于没有标注。
+>
+> **裁决的分类学判据（写入架构 §5.7）**：
+> - **评价型能力**（对用户**自己的作品**打分：`WRITING_REVIEW`）→ Mock **不得**返回罐头分 → 落规则轨。
+> - **内容型能力**（生成讲解/计划/诊断）→ Mock 罐头**可接受**——它不声称反映用户的任何真实属性，纯演示内容。
+> - `WRITING_REVIEW` 是当前唯一「评价型」能力，故只改它。
+>
+> **给工程师的精确规格（服务层零改动，已确认）**：
+>
+> | 文件:行号 | 操作 |
+> | --- | --- |
+> | `src/services/ai/providers/mock.ts:39-47` | **删除「作文批改/真题作文评分」整个 if 分支**。`WRITING_REVIEW` 随即落入 `:61` 的通用分支（返回 `{mock:true,echo,summary}`）→ `WritingReportSchema` 校验失败（缺 `totalScore`）→ gateway 修复重试后降级 → `degradeFor('WRITING_REVIEW')` 零分兜底 → `writing.service.ts:591` 的 `!res.degraded` 拦截 → **`scoreSource` 保持 `'rule'`**。不改 gateway、不改 service |
+> | `src/tests/writing-service.spec.ts:168` | 「Mock（degraded=true + 零分兜底）→ 绝不写 AI 分」用例**已存在且覆盖此路径**，无需新增；可补一条「mock provider 对 WRITING_REVIEW 不返回可校验的 WritingReport」的断言防回归 |
+> | `src/tests/e2e/writing-analyze-real.spec.ts` | 已声明「分支自适应」，Mock 改为恒降级后自动走 rule 轨断言，**无需改** |
+>
+> **两个已知代价（诚实记录，不隐藏）**：
+> 1. **Mock 阶段 AI 轨 UI（ScoreRadar/CorrectionList/RewriteTabs）不再被 E2E 覆盖**——服务层 AI 映射仍有单测（`writing-service.spec.ts:287` 注入数据），但 UI 级覆盖缺位。**记入 Phase 3 Backlog：接真实 AI Key 后首轮 E2E 必须覆盖 AI 轨渲染**（WRI-P3-1）。
+> 2. **AI 轨 `/15` 量纲未显示**（`report-header.tsx:30`）——Mock 阶段 AI 轨休眠故不阻塞；**Phase 3 接 AI 时必须显示 `9/15` + 维度满分**（并入 WRI-P3-1）。
+>
+> **顺带记录（P3，无需本轮处理）**：`writing.service.ts:599` 守卫存在一个理论洞——`dims !== null` 单独成立时（即使 `totalScore=0`）也会判为 AI 成功。当前 Mock 删分支后不会触发；若未来有 provider 返回「总分 0 但维度非零」会误判。防御性修法：`(total>0) || (dims!==null && Object.values(dims).some(v=>v>0))`。不阻塞，列入债务清单。
 
 #### **T18 · 翻译训练（轻量版）**
 - **依赖**：T17（复用 AI 流式基建）
@@ -969,7 +999,7 @@ graph TD
 | 4 | 听力 6 模式可完成并提交，报告含正确率 | E2E |
 | 5 | 阅读 quiz + 定位 + 划词可用，错题自动入库 | E2E |
 | 6 | 语法 14 类可浏览 + 练习 + 解析 | E2E |
-| 7 | 写作：边写边出规则提示，报告页在 AI Mock 下不空白 | E2E |
+| 7 | 写作：边写边出规则提示；**Mock 下 `scoreSource='rule'`（R2-10 裁决）**，报告页不空白 | E2E |
 | 8 | 翻译 5 档（Mock 下 1 档）+ 收藏入生词本 | E2E |
 | 9 | 口语：文本模式全链路可通，规则评分为确定性数值 | E2E + 单测 |
 | 10 | 专项卷 8 套可考，报告标注"非全真模考"、无 710 换算 | E2E |
