@@ -17,6 +17,7 @@ import type {
   WritingReport,
   WritingSubmissionDetail,
   WritingSubmissionListResult,
+  WritingRuleCheck,
   WritingTaskListResult,
 } from './types'
 
@@ -108,12 +109,15 @@ export function useCreateWriting() {
 
 /**
  * 自动保存（验收 6）：防抖 2.5s + 失败静默重试由下次输入触发。
- * `saving` 用于 AutosaveIndicator 展示。
+ * `saving` 用于 AutosaveIndicator 展示；`ruleCheck` 是**最新一次保存**的
+ * 规则检查结果（QA 第八轮 P2：编辑器内联面板由此实时更新——
+ * 详情只加载一次，若不回填，面板永远显示创建时快照）。
  */
 export function useWritingAutosave(id: string | null) {
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [ruleCheck, setRuleCheck] = useState<WritingRuleCheck | null>(null)
   const pendingRef = useRef<{ content?: string; title?: string } | null>(null)
   const inflightRef = useRef(false)
 
@@ -128,6 +132,7 @@ export function useWritingAutosave(id: string | null) {
       try {
         const r = await writingApi.autosave(id, payload)
         setSavedAt(r.updatedAt)
+        setRuleCheck(r.ruleCheck)
         setSaveError(null)
       } catch (e) {
         setSaveError(message(e, '自动保存失败'))
@@ -147,7 +152,7 @@ export function useWritingAutosave(id: string | null) {
     void flush()
   }, 2500)
 
-  return { schedule, flush, saving, savedAt, saveError }
+  return { schedule, flush, saving, savedAt, saveError, ruleCheck }
 }
 
 /** W4 AI 批改 */

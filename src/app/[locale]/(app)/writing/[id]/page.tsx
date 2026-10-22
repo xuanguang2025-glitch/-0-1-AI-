@@ -30,7 +30,7 @@ export default function WritingEditorPage(): React.JSX.Element {
   const router = useRouter()
 
   const { data, loading, error, reload } = useWritingDetail(submissionId)
-  const { schedule, flush, saving, savedAt, saveError } = useWritingAutosave(submissionId)
+  const { schedule, flush, saving, savedAt, saveError, ruleCheck: savedRuleCheck } = useWritingAutosave(submissionId)
   const { analyze, loading: analyzing, error: analyzeError } = useWritingAnalyze()
 
   const [title, setTitle] = useState('')
@@ -45,7 +45,9 @@ export default function WritingEditorPage(): React.JSX.Element {
     setContent(data.content.trim().length > 0 ? data.content : '')
   }, [data])
 
-  const ruleCheck = useMemo(() => data?.ruleCheck ?? null, [data])
+  // 规则面板数据源：**最新一次保存**的检查结果优先（QA 第八轮 P2——
+  // 详情只加载一次，若不回填，面板永远显示创建时快照，「边写边出提示」断链）
+  const ruleCheck = savedRuleCheck ?? data?.ruleCheck ?? null
   const required = useMemo(() => data?.requiredWords ?? { min: 0, max: 0 }, [data])
 
   /** 字数：与服务端同口径（去标点只留含字母词） */

@@ -8,6 +8,7 @@ import type {
   WritingAnalyzeResult,
   WritingCreateResult,
   WritingReport,
+  WritingRuleCheck,
   WritingSubmissionDetail,
   WritingSubmissionListResult,
   WritingTaskListResult,
@@ -64,9 +65,9 @@ export const writingApi = {
   /** W3 详情 */
   detail: (id: string) => request<WritingSubmissionDetail>(`/api/writing/${id}`),
 
-  /** 自动保存（内容变更即重算规则检查） */
+  /** 自动保存（内容变更即重算规则检查；响应携带完整 ruleCheck 供内联面板实时更新） */
   autosave: (id: string, body: { content?: string; title?: string }) =>
-    request<{ id: string; wordCount: number; ruleCheckScore: number | null; updatedAt: string }>(
+    request<{ id: string; wordCount: number; ruleCheckScore: number | null; ruleCheck: WritingRuleCheck; updatedAt: string }>(
       `/api/writing/${id}`,
       { method: 'PATCH', body: JSON.stringify(body) },
     ),

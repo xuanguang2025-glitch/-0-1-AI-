@@ -34,12 +34,18 @@ test('写作批改主链路：新建 → 输入 → 自动保存 → 批改 → 
   // ③ 输入作文 → 规则检查面板更新（验收 3：边写边出提示）
   const editor = page.getByTestId('writing-content')
   await expect(editor).toBeVisible({ timeout: FIRST_NAV })
+
+  // 防回归（QA 第八轮 P2）：先读面板**初值**，输入后断言分数改变——
+  // 占位稿创建时面板就有值，只断言「可见」会空转
+  const initialScore = (await page.getByTestId('rule-score').textContent()) ?? ''
   await editor.fill(ESSAY)
   await expect(page.getByTestId('word-count')).toContainText(/\d+ 词/, { timeout: 15_000 })
   await expect(page.getByTestId('inline-check-panel')).toBeVisible()
 
   // ④ 自动保存（验收 6：防抖 2.5s 后落库，指示器显示已保存）
   await expect(page.getByTestId('autosave-saved')).toBeVisible({ timeout: 15_000 })
+  // 面板分数必须随最新保存实时变化（合规作文 + ≥2 连接词 → 无连接词扣分，分数应上升）
+  await expect(page.getByTestId('rule-score')).not.toHaveText(initialScore, { timeout: 15_000 })
 
   // ⑤ 请求 AI 批改 → 跳转报告页
   await page.getByTestId('request-analyze').click()

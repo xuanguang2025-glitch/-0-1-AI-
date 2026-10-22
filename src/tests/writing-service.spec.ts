@@ -135,10 +135,14 @@ describe('自动保存 updateSubmission', () => {
     clearDictionaryCache()
   })
 
-  it('内容变更即重算规则检查并落库', async () => {
+  it('内容变更即重算规则检查并落库；响应携带完整 ruleCheck（QA 第八轮 P2）', async () => {
     const r = await updateSubmission('u1', 'ws-1', { content: cleanText() })
     expect(r.wordCount).toBeGreaterThan(60) // cleanText 144 词
     expect(r.ruleCheckScore).toBeGreaterThan(80)
+    // 响应携带完整规则检查结果 → 编辑器内联面板实时更新（否则面板停在创建时快照）
+    expect(r.ruleCheck).toBeTruthy()
+    expect(r.ruleCheck.score).toBe(r.ruleCheckScore)
+    expect(Array.isArray(r.ruleCheck.issues)).toBe(true)
     const data = h.updated[0]!
     expect(data.ruleCheckScore).toBeGreaterThan(80)
   })

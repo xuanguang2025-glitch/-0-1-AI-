@@ -391,7 +391,7 @@ export async function updateSubmission(
   userId: string,
   submissionId: string,
   input: WritingUpdateInput,
-): Promise<{ id: string; wordCount: number; ruleCheckScore: number | null; updatedAt: string }> {
+): Promise<{ id: string; wordCount: number; ruleCheckScore: number | null; ruleCheck: RuleCheckResult; updatedAt: string }> {
   const row = await prisma.writingSubmission.findFirst({
     where: { id: submissionId, userId, deletedAt: null },
     select: { id: true, content: true, title: true },
@@ -423,6 +423,9 @@ export async function updateSubmission(
     id: updated.id,
     wordCount: updated.wordCount,
     ruleCheckScore: updated.ruleCheckScore,
+    // QA 第八轮 P2：编辑器内联面板的数据源。保存响应**携带完整规则检查结果**，
+    // 前端本地合并——否则面板永远显示创建时快照（验收 3「边写边出提示」断链）。
+    ruleCheck,
     updatedAt: updated.updatedAt.toISOString(),
   }
 }
