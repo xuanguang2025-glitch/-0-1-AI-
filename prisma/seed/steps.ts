@@ -16,6 +16,7 @@ import { seedContent } from './seed-content'
 import { seedListeningP2 } from './seed-listening-p2'
 import { seedQuestions } from './seed-questions'
 import { seedSpeakingP2 } from './seed-speaking-p2'
+import { seedExamsP2 } from './seed-exams-p2'
 import { seedRoles } from './seed-roles'
 import { seedVocabulary } from './seed-vocabulary'
 
@@ -39,6 +40,7 @@ export const SEED_STEPS: readonly SeedStep[] = [
   { name: 'content', run: seedContent },
   { name: 'listening-p2', run: seedListeningP2 },
   { name: 'speaking-p2', run: seedSpeakingP2 },
+  { name: 'exams-p2', run: seedExamsP2 },
   { name: 'questions', run: seedQuestions },
   { name: 'ai', run: seedAi },
   { name: 'achievements', run: seedAchievements },
