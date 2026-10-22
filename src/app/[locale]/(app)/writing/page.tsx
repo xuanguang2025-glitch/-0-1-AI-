@@ -82,17 +82,15 @@ function NewDraftCard({ onCreate, creating, error }: { onCreate: (taskId: string
 
 export default function WritingListPage(): React.JSX.Element {
   const router = useRouter()
-  const [draftContent] = useState('')
   const { create, submitting, error } = useCreateWriting()
   const submissions = useWritingSubmissions()
 
-  /** 新建即进入编辑器（内容为空 → 编辑页再 autosave 落库） */
+  /** 新建即进入编辑器：先建一篇占位稿拿 id（服务端拒绝空内容，故用真实占位句，
+      用户在编辑页覆盖它，autosave 会立即以新内容落库） */
   const onStart = useCallback(
     (taskId: string) => {
       void (async () => {
-        // 先本地建一篇空白稿拿 id（空内容由服务端拒绝 → 这里带占位首句）
-        const initial = ' '
-        const r = await create({ taskId, content: initial })
+        const r = await create({ taskId, content: 'Draft started. Replace this with your essay.' })
         if (r) router.push(`${ROUTES.writing}/${r.id}`)
       })()
     },
@@ -104,7 +102,7 @@ export default function WritingListPage(): React.JSX.Element {
       <PageContainer>
         <PageHeader title="写作训练" description="规则检查实时提示 · AI 批改双轨评分 · 自动保存" />
 
-        <NewDraftCard onCreate={(id) => onStart(id)} creating={submitting || draftContent.length > 0} error={error} />
+        <NewDraftCard onCreate={(id) => onStart(id)} creating={submitting} error={error} />
 
         <section className="mt-8" data-testid="writing-submissions">
           <h2 className="mb-3 text-lg font-semibold">我的作文</h2>
