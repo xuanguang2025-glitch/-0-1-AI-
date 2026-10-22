@@ -18,6 +18,8 @@ export const ROUTES = {
     notebook: '/vocabulary/notebook',
     records: '/vocabulary/records',
   },
+  /** 错题本（阅读/语法/听力错题自动收录） */
+  notebook: '/notebook',
   listening: '/listening',
   speaking: '/speaking',
   reading: '/reading',

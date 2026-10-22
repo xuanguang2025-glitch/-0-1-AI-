@@ -66,7 +66,6 @@ import {
   createSubmission,
   getWritingReport,
   updateSubmission,
-  type WritingSubmissionDetail,
 } from '@/services/writing.service'
 
 const TASK = {
