@@ -304,3 +304,43 @@ describe('W5 getWritingReport — 回落保障', () => {
     await expect(getWritingReport('u1', 'nope')).rejects.toThrow(/作文不存在/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// R2-10 防回归：Mock 对 WRITING_REVIEW（评价型能力）不得返回可校验 WritingReport
+// 架构 §5.7：评价型能力打恒定分（如固定 9 分）是非偶然反馈，比没有反馈更有害。
+// mock.ts 的「作文批改」罐头分支已删除；若将来有人加回来，本用例会失败。
+// ---------------------------------------------------------------------------
+describe('R2-10 防回归：mock 不给评价型能力罐头分', () => {
+  it('mock provider 对 WRITING_REVIEW 不返回可校验 WritingReport（走 buildFallback 降级）', async () => {
+    // 直连 mock provider（不经 gateway 的 config/计费），验证 cannedJsonForCapability 行为
+    const { MockProvider } = await import('@/services/ai/providers/mock')
+    const provider = new MockProvider()
+    const chunks: Array<{ text: string }> = []
+    const iterable = provider.complete({
+      messages: [
+        { role: 'system', content: '你是 EnglishAI 的「作文批改」引擎，按 CET-4/CET-6 评分标准批改。' },
+        { role: 'user', content: 'Some essay text.' },
+      ],
+      model: 'mock',
+      temperature: 0.7,
+      maxTokens: 512,
+      stream: false,
+      jsonMode: true,
+      timeoutMs: 10_000,
+      firstTokenTimeoutMs: 10_000,
+    })
+    for await (const chunk of iterable) chunks.push(chunk)
+    const raw = chunks.map((c) => c.text).join('')
+    const parsed: unknown = JSON.parse(raw)
+
+    // 罐头分支若被加回来，这里会拿到 {totalScore:9, dimensions:{...}} → 本断言失败
+    const d = parsed as Record<string, unknown>
+    const hasTotalScore = typeof d.totalScore === 'number'
+    const hasNonZeroScore =
+      (hasTotalScore && (d.totalScore as number) > 0) ||
+      (typeof d.dimensions === 'object' &&
+        d.dimensions !== null &&
+        Object.values(d.dimensions as Record<string, unknown>).some((v) => typeof v === 'number' && v > 0))
+    expect(hasNonZeroScore).toBe(false)
+  })
+})

@@ -595,8 +595,9 @@ export async function analyzeSubmission(userId: string, submissionId: string): P
       aiSummary = typeof d.overallComment === 'string' && d.overallComment.trim().length > 0 ? d.overallComment : null
       aiCorrections = parseCorrections(d.corrections ?? d.sentences)
       aiRewrites = parseRewrites(d.rewrites ?? (d.modelEssay !== undefined ? { modelEssay: String(d.modelEssay) } : undefined))
-      // 只有拿到非零总分或维度分才认定 AI 成功（防止上游某天把 0 分塞进非降级路径）
-      if ((total !== null && total > 0) || dims !== null) {
+      // 只有拿到「非零总分」或「至少一个非零维度分」才认定 AI 成功
+      // （R2-10 防御加固：dims 全 0 也不算成功——防止上游把 0 分塞进非降级路径）
+      if ((total !== null && total > 0) || (dims !== null && Object.values(dims).some((v) => typeof v === 'number' && v > 0))) {
         aiDegraded = false
         scoreSource = 'ai'
         aiTotalScore = total

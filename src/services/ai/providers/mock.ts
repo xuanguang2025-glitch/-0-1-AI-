@@ -36,15 +36,13 @@ function cannedJsonForCapability(systemPrompt: string, userPrompt: string): stri
       collocations: ['mock exam'],
     })
   }
-  if (systemPrompt.includes('作文批改') || systemPrompt.includes('真题作文评分')) {
-    return JSON.stringify({
-      totalScore: 9,
-      dimensions: { content: 3, organisation: 3, language: 2, accuracy: 1 },
-      overallComment: '（Mock 兜底）结构完整，语言表达可再提升。',
-      sentences: [{ original: echo, corrected: null, issue: '（Mock 兜底）示例句。' }],
-      modelEssay: null,
-    })
-  }
+  // ⚠️ WRITING_REVIEW（评价型能力）**不得**有罐头分支（架构 §5.7 R2-10）：
+  //    对用户自己的作品打恒定分（如固定 9 分）是非偶然反馈，比没有反馈更有害。
+  //    刻意落入通用分支 → generic 文本 → WritingReportSchema 校验失败 →
+  //    gateway buildFallback → degraded=true → writing.service 的 `!res.degraded`
+  //    拦截生效 → scoreSource 保持 'rule'（设计文档验收 4 的既定行为）。
+  //    防回归测试：src/tests/writing-service.spec.ts「mock 对 WRITING_REVIEW
+  //    不返回可校验 WritingReport」。
   if (systemPrompt.includes('学习计划')) {
     return JSON.stringify({
       summary: '（Mock 兜底）两周基础巩固计划。',

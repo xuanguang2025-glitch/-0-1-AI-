@@ -46,10 +46,13 @@ describe('MockProvider jsonMode（能力感知 canned JSON）', () => {
     expect((data.senses ?? []).length).toBeGreaterThanOrEqual(1)
   })
 
-  it('作文批改：通过 WritingReportSchema', async () => {
+  // R2-10（架构 §5.7）：WRITING_REVIEW 是**评价型能力**，Mock 不得给罐头分——
+  // 通用分支的 generic 文本缺 totalScore → WritingReportSchema 校验失败 →
+  // gateway buildFallback → degraded=true → 服务层回落 rule 轨（设计验收 4）。
+  it('作文批改（评价型）：罐头 JSON 不通过 WritingReportSchema（刻意降级）', async () => {
     const raw = await collectJson(provider, '你是「作文批改」引擎。')
-    const data = guardStruct(WritingReportSchema, raw)
-    expect(data.totalScore).toBeGreaterThanOrEqual(0)
+    // 通用分支返回 {mock, echo, summary}——无 totalScore/dimensions → guardStruct 抛错
+    expect(() => guardStruct(WritingReportSchema, raw)).toThrow(/不符合 Schema/)
   })
 
   it('学习计划：通过 GeneratedPlanSchema', async () => {
