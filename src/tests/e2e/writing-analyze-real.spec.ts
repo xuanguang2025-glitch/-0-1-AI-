@@ -6,9 +6,9 @@
  * 覆盖：任务列表 → 新建作文 → 编辑器输入（自动保存 + 规则检查实时更新）
  *       → 请求 AI 批改 → 报告页 scoreSource 徽章（验收 8）。
  *
- * Mock 环境：gateway 的 mock provider 对写作返回**合法罐头数据**（totalScore=9 +
- * 四维分，degraded=false），因此实际走 AI 轨；断言对两种轨自适应
- * （若上游改为恒降级则 rule 轨），核心验收点是「scoreSource 徽章真实 + 页面不空白」。
+ * Mock 环境（R2-10 后）：WRITING_REVIEW 为评价型能力，mock **不返回罐头分**——
+ * generic 文本过不了 WritingReportSchema → buildFallback → degraded=true → **恒 rule 轨**；
+ * 断言对两种轨自适应，核心验收点是「scoreSource 徽章真实 + 页面不空白」。
  * 前置：seed 已导入 30 个写作任务（`npm run db:seed`）。
  */
 import { test, expect } from '@playwright/test'
@@ -51,9 +51,9 @@ test('写作批改主链路：新建 → 输入 → 自动保存 → 批改 → 
   await page.getByTestId('request-analyze').click()
   await expect(page).toHaveURL(/\/writing\/[a-z0-9]+\/report/i, { timeout: FIRST_NAV })
 
-  // ⑥ 验收 8：scoreSource 徽章可见（分支自适应——本仓库 Mock provider 对写作返回
-  //    合法罐头数据且 degraded=false（totalScore=9 + 四维分），因此实际会走 AI 轨；
-  //    若上游某天改为恒降级则走 rule 轨。两种都是合法渲染，核心断言是「不空白」）
+  // ⑥ 验收 8：scoreSource 徽章可见（分支自适应——R2-10 后 Mock 恒 rule 轨：
+  //    mock 无罐头分支 → Schema 校验失败 → degraded=true；实测徽章=「规则评分」。
+  //    若上游某天恢复罐头则走 AI 轨。两种都是合法渲染，核心断言是「不空白」）
   await expect(page.getByTestId('report-header')).toBeVisible({ timeout: FIRST_NAV })
   const badge = page.getByTestId('score-source-badge')
   await expect(badge).toHaveText(/规则评分|AI 评分/)
@@ -71,7 +71,7 @@ test('写作批改主链路：新建 → 输入 → 自动保存 → 批改 → 
   // 两种轨都渲染规则检查结果
   await expect(page.getByTestId('report-rule-issues')).toBeVisible()
 
-  // ⑧ 回到列表：记录带 scoreSource 徽章（Mock 下 AI 轨 → 「AI 评分」）
+  // ⑧ 回到列表：记录带 scoreSource 徽章（R2-10 后 Mock 恒 rule 轨 → 「规则评分」）
   await page.goto('/writing')
   await expect(page.getByTestId('writing-submissions')).toBeVisible({ timeout: FIRST_NAV })
   await expect(page.getByText(/规则评分|AI 评分/).first()).toBeVisible()

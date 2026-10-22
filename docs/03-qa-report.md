@@ -905,3 +905,12 @@ T18 4 项全 PASS；错题本闭环 PASS。Alex 修复内联面板刷新 + 补�
 规则检查同步（服务端 + 内联面板全链路实时）· 自动保存（防抖/续排/flush）·
 字数不足提示 · E2E 真链路 · scoreSource 徽章 · 防回归断言。
 T18 翻译四项 + 错题本闭环此前已 PASS。QA 无未决事项。
+
+## P2 复验补充（team-lead 清单余项）
+
+- **合并优先级语义确认**：`page.tsx:50` `savedRuleCheck ?? data?.ruleCheck ?? null`——最新保存优先于
+  页面加载快照，未保存时回退加载值，语义正确；
+- **E2E 实跑**：`writing-analyze-real.spec.ts` **2/2**（WebServer 日志实时可见 R2-10 链路：
+  "AI 输出不符合 Schema" ×2 → buildFallback → rule 轨）；
+- **过时注释已由 QA 顺手清理**（spec 头部/⑥/⑧ 三处"Mock 走 AI 轨"→"R2-10 后 Mock 恒 rule 轨"），
+  清理后复跑 2/2 确认无碍；`qa-r210-tmp.spec.ts` 残留已删，临时文件 0。
