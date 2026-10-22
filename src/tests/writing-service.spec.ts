@@ -90,40 +90,6 @@ const DICT_WORDS = [
   'write', 'more', 'short', 'still', 'enjoy', 'kind', 'teacher', 'my',
 ]
 
-function makeDetail(over: Partial<WritingSubmissionDetail> = {}): WritingSubmissionDetail {
-  return {
-    id: 'ws-1',
-    taskId: 'wt-1',
-    taskTitle: 'My Writing Task',
-    prompt: 'Write an essay.',
-    title: null,
-    content: cleanText(),
-    wordCount: 130,
-    paragraphCount: 1,
-    requiredWords: { min: 120, max: 200 },
-    wordCountOk: true,
-    ruleCheck: {
-      score: 90,
-      issues: [],
-      stats: { wordCount: 130, sentenceCount: 8, paragraphCount: 1, longSentences: 0, passiveCount: 0, connectorCount: 2, spellingErrors: [] },
-      passed: true,
-    },
-    ruleCheckScore: 90,
-    aiScores: null,
-    aiTotalScore: null,
-    aiCorrections: null,
-    aiRewrites: null,
-    aiSummary: null,
-    scoreSource: 'rule',
-    aiDegraded: true,
-    revision: 0,
-    status: 'DRAFT',
-    submittedAt: null,
-    scoredAt: null,
-    ...over,
-  }
-}
-
 describe('W2 createSubmission — 同步规则检查', () => {
   beforeEach(() => {
     h.taskFirst = TASK
