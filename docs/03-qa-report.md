@@ -865,3 +865,25 @@ E2E 补一条「面板分数随输入变化」的断言（先读初值 → 输�
 **批次 D → CONDITIONAL YES**：核心逻辑（规则引擎扣分、双轨降级、裁剪、幂等、竞态守卫、单一写入口）
 全部独立复算通过且质量高；唯一实质缺陷是**内联面板不实时**（P2，纯前端展示层、数据无损坏、修复成本低）。
 修掉面板刷新 + 补一条防回归断言即可转 YES，无需全轮重验（QA 只复验该点）。
+
+## R2-10 补验（T17 验收 4）— [PASS]（架构师裁决后修复，commit `c525e6a`）
+
+> 背景：mock provider 原对 WRITING_REVIEW 返回罐头分（degraded=false → AI 轨），违反验收 4 本意
+> （评价型能力不得打恒定分）。架构师 R2-10 裁决方案 2：删罐头分支。修复与 QA 报告并行完成。
+
+- **mock.ts 代码确认**：WRITING_REVIEW 罐头分支已删，原位留分类学注释 + 指向防回归测试
+  （generic 文本 → WritingReportSchema 校验失败 → buildFallback → degraded=true → rule 轨）；
+- **防回归测试在位**：`writing-service.spec.ts:314`（mock 对 WRITING_REVIEW 不返回可校验 WritingReport）
+  + `ai-mock.spec.ts:49`（断言已反转为「罐头 JSON 不通过 Schema」）；
+- **链路实测**（QA 临时 spec，API 级：创建 → analyze，跑毕已删）：
+  **scoreSource = 'rule'、aiDegraded = true、aiTotalScore = null**——验收 4 恢复设计既定行为；
+  附带确认 create 响应同步携带完整 ruleCheck（70 分含连接词扣分，口径与验收 3 数据源一致）；
+- **门禁复跑**：vitest **323/323**、tsc **0 错**、lint **0 警告**；
+- 小 nit：`writing-analyze-real.spec.ts:68` 注释「Mock 下 AI 轨 → AI 评分」已过时（Mock 现在恒 rule 轨），
+  徽章断言为自适应正则不受影响。
+
+## 结论（终版）
+
+**批次 D → CONDITIONAL YES，唯一遗留 = P2（内联规则面板不实时，见上文）**。
+R2-10 补验通过后，T17 全部 8 项验收中 7 项 PASS、1 项（验收 3）受 P2 影响；
+T18 4 项全 PASS；错题本闭环 PASS。Alex 修复内联面板刷新 + 补防回归断言后，QA 单点复验即可转 YES。
