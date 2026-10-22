@@ -657,3 +657,103 @@ DB 结果：60 行无重复、遗留题目 0 条。两个种子文件头部均�
 **第六轮唯一保留缺陷已修复且根因已治理，批次 B → YES。**
 三个 nit 全部落地且质量高于要求（尤其 nit2 只提首航断言、nit3 连 update 分支一起修）。
 门禁 266/266 + tsc 0 + lint 0 + E2E 冷启 2/2，均由 QA 独立复跑证实。
+
+---
+
+# 第七轮 · 批次 C（T15 阅读 + T16 语法）
+
+> 对象：批次 C 的 reading+grammar 域（commit `b67a217..3f8733c` 共 10 个，含掌握度量纲修复 `3f8733c`）。
+> 当前 HEAD `223be64`（工程师批次 D WIP）——**writing/translation 域不在本轮范围**。
+> 注：team-lead 原话「批次 C 范围 `62507e9..72a6077`」实际为空集——批次 C 的 commit 在 `62507e9` **之前**
+> （`b67a217..3f8733c`），已按实际范围验证。
+
+## ① 判分与服务端逻辑独立复算 — [PASS]
+
+**阅读判分**（`reading.service.ts:277-312` 代码级 + E2E 待跑）：
+- `normalizeAnswer` = trim + 大写；`gradeSingle` 额外剥离 `[.\-、,，\s]`（容忍 "A."/"A、"/"A "）；
+- `gradeMulti` 集合比对（忽略顺序与分隔符 `[,，、\s|]`）——"A,B" ≡ "B A"；
+- `score = round(correct/total × 100)`；未知题目 id 跳过不炸整次提交；
+- 错题本：`findFirst(masteredAt:null)` → 命中 `errorCount+1`、未命中 create——**一题一行**，累加语义正确。
+
+**语法判分与掌握度**（`grammar.service.ts:194-197, 467-489`）：
+- 掌握度 = `round(累计答对 / 累计答题 × 100)`，**两计数均为题目级**（`nextAttempts = prev + total`、
+  `nextCorrect = prev + correctCount`）——333% 量纲 bug（次数 +1、对数 +N）确已修复；
+- **「答 3 题对 2 题」手算**：2/3 = 66.67%，字段为 Int → 存 **67**（`grammar-service.spec.ts:334-335`
+  断言 67，口径一致）；第二次再对 3 题 → round(5/6×100) = **83**（真实 API 复算见 ④，实测吻合）；
+- mastered 判定 = mastery ≥ 80 **且** 累计答题 ≥ 3（`MASTERY_THRESHOLD`/`MASTERY_MIN_ATTEMPTS`）；
+- 错题本同阅读口径（source='grammar'）。
+
+**划词释义 `lookupWord`（0 AI）**：
+- 归一化 `trim+lower+剥非[a-z'-]`；空串 → 400 VALIDATION_ERROR（不崩）；
+- **未收录 → `found:false` + 结构化空数组**（非裸空对象、非报错）——前端可渲染"未收录"不阻塞阅读；
+- 命中 → word/音标/pos/definitions/examples（脏 Json 逐字段过滤，examples 截前 3 条）。
+
+**AI 句子讲解（唯一 AI 介入点）**：degraded/空文本/异常 → `{explanation:null, degraded:true}`——
+与「Mock 时隐藏区块」的前端约定吻合。
+
+## ② seed 数据真实性 — [PASS]（独立 DB 审计，不采信声称）
+
+- 阅读：60 篇全 PUBLISHED、0 软删；**题目 120/120 location 非空**（`{charStart, charEnd, blockIndex}` 结构合法 0 异常）；
+  **进一步做越界检查：0 个 blockIndex ≥ 文章块数**（工程师只声称"有 location"，QA 加验了可定位性）；
+- 语法：**14 主题、parentId 全 null**（14 个根节点）；**每主题恰好 4 题**（分布 {"4":14}，与 E2E 可做题数一致）；
+- 死链残留：阅读/语法域 seed 无音频 URL 类字段、无外链资源，无可死链面；阅读 detail 响应题目**不含 answer 字段**（防作弊，实测确认）。
+
+## ③ 前端完整性 — [PASS]
+
+- 组件清单与设计文档 741-777 行**逐名一致**：阅读 8（article-body/key-word-rail/sentence-analysis/
+  translation-toggle/quiz-area/quiz-result/highlight-popover/explain-panel）+ 语法 7（topic-tree/topic-detail/
+  example-card/error-example/exercise-runner/explain-panel/mastery-badge）；页面阅读 2 + 语法 3；
+  API 路由阅读 7（文档 R1-R4 之外多 progress/highlight/word，超集）+ 语法 5；
+- **AI 降级两种策略未搞反**：阅读 `explain-panel.tsx:23` degraded → `return null`（区块隐藏）；
+  语法 `explain-panel.tsx:7` 服务端回落 static，组件展示并标注来源——与设计分工（阅读 AI 附属、语法讲解主体）一致；
+- 断点续读：`reading/[id]/page.tsx:64` 进入页面按 `lastBlockIndex` 恢复高亮/滚动，滚动进度防抖 2s 上报（`hooks.ts:84-86`）✓；
+  划词未命中：`highlight-popover.tsx:59` 渲染 `popover-not-found`（明确"未收录"而非空白）✓；
+  语法来源标注：`explain-panel.tsx:27-28` 徽章区分「AI 生成 / 静态知识点（AI 不可用）」✓。
+
+## ④ E2E 实跑 + 冷启动回归 — [PENDING]
+
+## ⑤ 门禁 — [PENDING]
+
+## ④ E2E 实跑 + 冷启动回归 — [PASS]（首轮失败为环境问题，已定位排除）
+
+- **首轮 3 条全挂 → 定位为 [ENV]**：`chromium_headless_shell-1194` 二进制缺失（Playwright 版本更新后未
+  重新 install），浏览器启动即失败（44s 内 3 failed，非断言/超时问题）；`npx playwright install chromium` 后排除；
+- **安装后冷启动实跑（Playwright 自带全新 dev server，未手动预热）：3/3 通过（1.6m）**——
+  reading 2 条（打开文章→断点续读→划词直查→quiz→提交→报告；列表筛选/搜索）+ grammar 1 条
+  （目录→主题详情→讲解→做题→提交→解析）；**FIRST_NAV=45s 在批次 C 场景同样稳定，批次 B 的冷启动
+  flaky 未复发**；
+- **API 级真数据复算（curl + 直查 DB，QA 自建账号）**：
+  - 语法掌握度：提交1（3题2对，其一用 `" a. "` 容错）→ score=67、**mastery=67、attemptCount=3**（手算 2/3=66.67→67 ✓）；
+    提交2（同 3 题全对）→ **mastery=83、attemptCount=6**（手算 round(5/6×100)=83 ✓）——
+    **量纲修复实证：attemptCount 按题累计（3→6），333% 溢出场景不可能再发生**；
+    库内 `user_grammar_progress` {mastery:83, attemptCount:6, correctCount:5} 与 API 一致；
+  - 错题累加：gq-1-3 错 1 次 → 1 行 errorCount=1；阅读 rq-2 错 2 次 → **1 行 errorCount=2**（不重复建行）；
+  - 阅读判分：2 题 1 对 1 错 → score=50 ✓；**容差集实测 = `[.、,，\s-]`**（" a. " 判对、"a;" 判错——分号
+    不在容差集，实现与规格一致，QA 探针误用分号被正确判错）；
+  - 划词：命中 "Economy" → found=true + 2 条释义；未命中 "qqzzxx" → HTTP 200 + found=false + 空数组（不崩不裸对象）；
+  - 断点续读：save(progress=45, lastBlockIndex=3) → detail 返回 45/3 ✓；quiz 提交后 quizResult 为**最新一次**
+    快照（覆盖式，非聚合——设计未要求聚合，记录为口径）。
+
+## ⑤ 门禁 — [PASS]
+
+- `vitest run`：**300/300（19 文件）**——较 team-lead 预期的 266 多 34 个，系批次 D 的 writing-rule-engine
+  等新测试已随 HEAD `223be64` 入库（reading+grammar 域测试全部在内且通过）；
+- `tsc --noEmit`：**0 错**；`next lint`：**0 警告**。
+
+## 设计偏差记录（非缺陷）
+
+1. 设计文档标注 R4 explain「**流式**」，实现为普通 JSON POST——单句讲解场景功能无损，但与文档不符，
+   建议改文档或后续补流式；
+2. quiz 重复提交时 `readingRecord.quizResult` 为最新一次快照（覆盖式）——设计未规定聚合口径，记录备查。
+
+## 结论
+
+**批次 C（T15 阅读 + T16 语法）→ YES，可交付。**
+- 判分/掌握度/错题本/划词/断点续读全部经**真实 API + DB 独立复算**证实（非只看单测绿）；
+- 333% 量纲 bug 修复实证（attemptCount 3→6 按题累计，mastery 67→83 与手算一致）；
+- 120/120 location 独立审计通过且 0 越界（超出工程师声称的范围）；
+- 两种 AI 降级策略实现与设计分工一致（阅读隐藏 / 语法 static 兜底）；
+- E2E 冷启动 3/3，FIRST_NAV 修复跨批次稳定；
+- 两处设计偏差（explain 流式、quizResult 覆盖口径）均不构成功能缺陷，记录在案。
+- [ENV] 备注：首轮 E2E 因 chromium 二进制缺失全挂（`npx playwright install chromium` 后排除），
+  建议在 README/CI 说明中补充该前置条件。
