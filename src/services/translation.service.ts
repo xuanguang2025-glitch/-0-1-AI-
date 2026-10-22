@@ -148,14 +148,22 @@ export async function translateText(userId: string, input: TranslateInput): Prom
     throw new AppError('VALIDATION_ERROR', `内容过长（上限 ${MAX_SOURCE_LEN} 字符，当前 ${text.length}）`)
   }
 
-  // ---- AI 翻译（防御式解析；Mock generic 回显 → literal）----
+  // ---- AI 翻译（防御式解析）----
+  // TRANSLATE 是**纯文本能力**（outputSchema=null）：真实模型返回自由文本，
+  // Mock 返回 CANNED_TEXT 字符串 —— 按设计验收 2（「Mock 时仅 literal 有内容」），
+  // 字符串结果映射到 literal，其余 4 档留空由前端显示「AI 暂不可用」。
+  // 若未来升级为结构化 5 档输出（JSON 带 literal/natural/... 键），parseStyles 直接兼容。
   let styles: TranslationStyles = { literal: null, natural: null, formal: null, academic: null, spoken: null }
   let notes: string | null = null
   try {
     const res = await aiService.translate({ text, direction }, { userId, traceId: `translation-${Date.now()}`, locale: 'zh-CN' })
     if (!res.degraded && res.data !== null) {
-      styles = parseStyles(res.data)
-      notes = parseNotes(res.data)
+      if (typeof res.data === 'string' && res.data.trim().length > 0) {
+        styles = { ...styles, literal: res.data.trim() }
+      } else {
+        styles = parseStyles(res.data)
+        notes = parseNotes(res.data)
+      }
     }
   } catch (error) {
     log.warn({ msg: 'translate failed (all styles unavailable)', userId, error: String(error) })

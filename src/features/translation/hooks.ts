@@ -68,6 +68,8 @@ export function useTranslationHistory(favoriteOnly = false) {
   const [state, setState] = useState<AsyncState<TranslationHistoryResult>>({ data: null, loading: true, error: null })
   const aliveRef = useRef(true)
   const [page, setPage] = useState(1)
+  /** reload 强制刷新（page 已是 1 时 setPage 是 no-op，需要 nonce 触发 effect） */
+  const [nonce, setNonce] = useState(0)
   const pageSize = 20
 
   useEffect(() => {
@@ -91,9 +93,13 @@ export function useTranslationHistory(favoriteOnly = false) {
     return () => {
       cancelled = true
     }
-  }, [page, favoriteOnly])
+  }, [page, favoriteOnly, nonce])
 
-  const reload = useCallback(() => setPage(1), [])
+  /** 翻译/收藏完成后调用：回到第 1 页并强制刷新 */
+  const reload = useCallback(() => {
+    setPage(1)
+    setNonce((n) => n + 1)
+  }, [])
   return { ...state, page, setPage, reload }
 }
 

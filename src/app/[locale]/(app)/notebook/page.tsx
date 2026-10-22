@@ -41,20 +41,6 @@ export default function NotebookPage(): React.JSX.Element {
         <PageHeader
           title="错题本"
           description="阅读 / 语法 / 听力做错的题自动收录 · 掌握后可重新打开"
-          actions={
-            <Button
-              type="button"
-              size="sm"
-              variant={masteredFilter === 'pending' ? 'default' : 'outline'}
-              onClick={() => {
-                setMasteredFilter('pending')
-                setPage(1)
-              }}
-              data-testid="filter-pending"
-            >
-              待复习
-            </Button>
-          }
         />
 
         {/* 掌握状态筛选 */}
