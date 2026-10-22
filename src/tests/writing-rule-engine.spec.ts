@@ -14,6 +14,7 @@ import {
   PASSIVE_MAX,
   PASSIVE_PER,
   SENTENCE_LENGTH_MAX,
+  SENTENCE_LENGTH_PER,
   SPELLING_MAX,
   SPELLING_PER_ERROR,
   checkConnectors,
@@ -27,16 +28,34 @@ import {
   tokenizeWords,
 } from '@/services/writing/rule-engine'
 
-/** 测试用迷你词典（真实场景由 service 注入 vocabulary 表全量 lemma） */
+/**
+ * 用词典内的词拼一个 N 词长句（避免填充词本身触发拼写扣分干扰断言）。
+ */
+function longSentenceOf(n: number): string {
+  const pool = ['students', 'study', 'hard', 'every', 'day', 'and', 'the', 'school', 'work', 'books']
+  return Array.from({ length: n }, (_, i) => pool[i % pool.length]!).join(' ')
+}
 const DICT = new Set([
-  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-  'i', 'we', 'they', 'it', 'this', 'that', 'and', 'or', 'but', 'however', 'therefore',
-  'students', 'student', 'study', 'studied', 'learning', 'learn', 'school', 'schools',
+  // 功能词
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am', 'have', 'has', 'had',
+  'i', 'we', 'they', 'it', 'this', 'that', 'my', 'our', 'us', 'him', 'her', 'his', 'she', 'he',
+  'and', 'or', 'but', 'however', 'therefore', 'of', 'to', 'for', 'with', 'without', 'from', 'at', 'on', 'in', 'by',
+  'can', 'should', 'will', 'would', 'do', 'does', 'did', 'not', 'no', 'yes', 'so', 'if', 'when',
+  // 常用名词/动词/形容词/副词
+  'students', 'student', 'study', 'studied', 'studying', 'studys', 'learning', 'learn', 'school', 'schools',
   'important', 'very', 'much', 'more', 'most', 'good', 'bad', 'new', 'old', 'year', 'years',
-  'time', 'day', 'days', 'people', 'work', 'working', 'hard', 'can', 'should', 'will',
-  'also', 'because', 'while', 'although', 'first', 'second', 'finally', 'in addition',
-  'for example', 'as a result', 'reading', 'books', 'book', 'library', 'teacher', 'teachers',
-  'written', 'wrote', 'by', 'of', 'to', 'for', 'with', 'without', 'from', 'at', 'on', 'in',
+  'time', 'day', 'days', 'people', 'work', 'working', 'works', 'hard', 'every', 'daily', 'often',
+  'love', 'loves', 'like', 'likes', 'reading', 'read', 'books', 'book', 'library', 'librarian',
+  'teacher', 'teachers', 'letter', 'letters', 'author', 'authors', 'famous', 'kind', 'nice',
+  'use', 'used', 'using', 'useful', 'grow', 'grows', 'growing', 'vocabulary', 'fast', 'slowly',
+  'surely', 'task', 'tasks', 'job', 'jobs', 'plan', 'plans', 'make', 'makes', 'start', 'starts',
+  'finish', 'finishes', 'recommend', 'recommends', 'recommend', 'send', 'sends', 'delivered',
+  'twenty', 'minutes', 'night', 'enough', 'found', 'researchers', 'sleep', 'write', 'writing',
+  'wrote', 'written', 'done', 'made', 'sent', 'taken', 'given', 'built', 'kept', 'help',
+  // 多词连接词的组成词（checkSpelling 按单词切分，不会把 "for example" 当整体）
+  'example', 'as', 'result', 'addition', 'instance', 'conclusion', 'hand', 'fact', 'first', 'second', 'finally', 'also',
+  // 组合用例文本中的词（保持拼写项只抓有意放入的错误词）
+  'still', 'enjoy', 'enjoys', 'therefore', 'however',
 ])
 
 // ---------------------------------------------------------------------------
@@ -227,15 +246,20 @@ describe('runRuleCheck 组合扣分', () => {
     expect(r.passed).toBe(true)
   })
 
-  it('仅拼写 2 个错误 → 88 分（断言总分）', () => {
-    const r = runRuleCheck('I lovve my scool and my teacher is kind.', { knownWords: DICT })
-    expect(r.score).toBe(88)
+  it('仅拼写 2 个错误 → 90 分（扣分依据：2 × SPELLING_PER_ERROR=5）', () => {
+    // 文本刻意含 however + therefore 两个**表内**连接词（and 是并列连词，
+    // 不在 CONNECTORS 语篇连接词表里——设计如此），避免触发 connectors 扣分以隔离拼写项
+    const r = runRuleCheck('However, I lovve my scool and my teacher is kind. Therefore, I still enjoy it.', { knownWords: DICT })
     expect(r.issues.map((i) => i.rule)).toEqual(['spelling'])
+    expect(r.issues[0]?.deduction).toBe(10) // 2 × 5
+    expect(r.score).toBe(90) // 100 - 10
+    // passed 要求「无拼写错误」：有 2 个 → 即使 90 分也不算通过
+    expect(r.passed).toBe(false)
   })
 
   it('拼写(5) + 句长(5) + 连接词(10) → 80 分（三类叠加）', () => {
-    const long = Array.from({ length: 26 }, (_, i) => `w${i}`).join(' ')
-    const text = `I lovve reading. ${long}.`
+    // 长句用词典内词拼，避免填充词触发拼写扣满 20 干扰断言
+    const text = `I lovve reading. ${longSentenceOf(26)}.`
     const r = runRuleCheck(text, { knownWords: DICT })
     expect(r.score).toBe(80)
     expect(r.issues.map((i) => i.rule).sort()).toEqual(['connectors', 'sentenceLength', 'spelling'])
@@ -243,21 +267,29 @@ describe('runRuleCheck 组合扣分', () => {
     expect(r.issues.reduce((n, i) => n + i.deduction, 0)).toBe(20)
   })
 
-  it('全部 5 类齐发 → 各扣分累加，总分不低于 0', () => {
-    // 拼写 1（5）+ 句长 1（5）+ 连接词 0（10）+ 段落 1 段长文（10）+ 被动 1（3）= 43 → 57
-    const longSentence = `${Array.from({ length: 30 }, (_, i) => `w${i}`).join(' ')}.`
+  it('全部 5 类齐发 → 各扣分累加（5+5+10+10+3=33）→ 67 分', () => {
+    // 扣分依据：
+    //   spelling      1 错（lovve）→ 5
+    //   sentenceLength 1 个 30 词长句（词典内词拼装）→ 5
+    //   connectors    全文 0 连接词 → 10
+    //   paragraphs    130+ 词仅 1 段 → 10
+    //   passiveVoice  1 处（was written）→ 3
+    // 合计 33 → 100 - 33 = 67
+    // 填充段用词典内词且每 10 词加句号：不额外触发拼写/长句
+    const fillerSentences = Array.from({ length: 13 }, () => 'students study hard every day and the school work books.').join(' ')
     const text = [
       'I lovve reading.',
-      longSentence,
-      Array.from({ length: 130 }, (_, i) => `filler${i}`).join(' '),
+      `${longSentenceOf(30)}.`,
+      fillerSentences,
       'The book was written by him.',
     ].join(' ')
     const r = runRuleCheck(text, { knownWords: DICT })
     expect(r.issues.map((i) => i.rule).sort()).toEqual([
       'connectors', 'paragraphs', 'passiveVoice', 'sentenceLength', 'spelling',
     ])
-    expect(r.score).toBe(57)
-    expect(r.passed).toBe(false) // 57 < 60
+    expect(r.issues.reduce((n, i) => n + i.deduction, 0)).toBe(33)
+    expect(r.score).toBe(67)
+    expect(r.passed).toBe(false) // 67 < 60 → false
   })
 
   it('扣分总和永不超过 100（下限钳制到 0）', () => {
